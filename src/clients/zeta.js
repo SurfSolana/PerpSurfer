@@ -695,6 +695,12 @@ export class ZetaClientWrapper {
           : order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
       );
 
+      if (!stopLoss || !takeProfit) {
+        logger.info(`No stop loss or take profit found, stopping monitoring`);
+        this.stopMonitoring(marketIndex, direction);
+        return;
+      }
+
       const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
       const currentPrice = this.getCalculatedMarkPrice(marketIndex);
       const takeProfitPrice = takeProfit.orderPrice / 1e6;
