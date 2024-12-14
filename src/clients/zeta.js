@@ -735,7 +735,7 @@ Opening ${direction} position:
 			: price + (stopLossPrice - price) * 0.95; // Short: Entry + 95% of distance to SL
 
 		// Log calculations for verification
-		logger.info("TP/SL Price Calculations:", {
+		console.log("TP/SL Price Calculations:", {
 			direction,
 			entryPrice: price,
 			takeProfit: {

@@ -4,3 +4,4 @@ node_modules/
 combined.log
 error.log
 pnpm-lock.yaml
+positions-log.md
