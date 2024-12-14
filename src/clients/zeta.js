@@ -29,47 +29,53 @@ import {
 	fetchSolanaPriorityFee,
 } from "@drift-labs/sdk";
 import readline from "readline";
+import WebSocket from "ws";
+
 
 dotenv.config();
 
 export class ZetaClientWrapper {
-	constructor() {
-		this.client = null;
-		this.connection = null;
-		this.wallet = null;
-		this.activeMarket = constants.Asset.SOL;
-		this.use_db_settings = true;
+  constructor() {
+    // Core components
+    this.longClient = null;
+    this.shortClient = null;
+    this.connection = null;
+    this.symbols = [];
 
-		this.priorityFees = null;
-		this.priorityFeeMultiplier = 5;
-		this.currentPriorityFee = 5_000;
+    // WebSocket state
+    this.ws = null;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.connectionActive = false;
 
-		this.monitoringInterval = null;
+    // Message handling
+    this.messageQueue = [];
+    this.isProcessingQueue = false;
+    this.MAX_QUEUE_SIZE = 1000;
 
-		this.positionState = {
-			isMonitoring: false,
-			isAdjusting: false,
-			marketIndex: null,
-			position: null,
-			orders: {
-				takeProfit: null,
-				stopLoss: null,
-			},
-			entryPrice: null,
-			hasAdjustedStopLoss: false,
-		};
+    // Priority Fees
+    this.priorityFees = null;
+    this.priorityFeeMultiplier = 5;
+    this.currentPriorityFee = 5_000;
 
-		this.settings = {
-			leverageMultiplier: 4,
-			takeProfitPercentage: 0.036,
-			stopLossPercentage: 0.018,
-			trailingStopLoss: {
-				progressThreshold: 0.6,
-				stopLossDistance: 0.4,
-				triggerDistance: 0.45,
-			},
-		};
-	}
+    // System monitoring
+    this.healthCheckInterval = null;
+    this.monitoringState = new Map();
+    this.lastCheckedPrice = null;
+    this.isAdjusting = false;
+
+    // Settings
+    this.settings = {
+      leverageMultiplier: 4,
+      takeProfitPercentage: 0.036,
+      stopLossPercentage: 0.018,
+      trailingStopLoss: {
+        progressThreshold: 0.6,
+        stopLossDistance: 0.4,
+        triggerDistance: 0.45,
+      },
+    };
+  }
 
 	roundToTickSize(nativePrice) {
 		// Convert from native integer to decimal first
@@ -81,74 +87,313 @@ export class ZetaClientWrapper {
 		return Math.round(roundedDecimal * 1e6);
 	}
 
-	async initializeClient(keypairPath = null) {
-		try {
-			const keyPath = keypairPath || process.env.KEYPAIR_FILE_PATH;
-			this.connection = new Connection(process.env.RPC_TRADINGBOT);
+  async initialize(symbols) {
+    try {
+      this.symbols = symbols;
+      logger.info("Initializing Trading System", {
+        symbols: this.symbols,
+        longWallet: process.env.KEYPAIR_FILE_PATH_LONG,
+        shortWallet: process.env.KEYPAIR_FILE_PATH_SHORT,
+      });
+  
+      this.connection = new Connection(process.env.RPC_TRADINGBOT);
+  
+      // Initialize long wallet
+      const longSecretKey = Uint8Array.from(JSON.parse(
+        fs.readFileSync(process.env.KEYPAIR_FILE_PATH_LONG, "utf8")
+      ));
+      const longKeypair = Keypair.fromSecretKey(longSecretKey);
+      const longWallet = new Wallet(longKeypair);
+  
+      // Initialize short wallet
+      const shortSecretKey = Uint8Array.from(JSON.parse(
+        fs.readFileSync(process.env.KEYPAIR_FILE_PATH_SHORT, "utf8")
+      ));
+      const shortKeypair = Keypair.fromSecretKey(shortSecretKey);
+      const shortWallet = new Wallet(shortKeypair);
+  
+      logger.info("Wallets initialized successfully");
+  
+      // Create set of markets to load
+      const marketsToLoad = new Set([constants.Asset.SOL, ...symbols]);
+      const marketsArray = Array.from(marketsToLoad);
+  
+      // Initialize Exchange once
+      const loadExchangeConfig = types.defaultLoadExchangeConfig(
+        Network.MAINNET,
+        this.connection,
+        {
+          skipPreflight: true,
+          preflightCommitment: "finalized",
+          commitment: "finalized",
+        },
+        25,
+        true,
+        this.connection,
+        marketsArray,
+        undefined,
+        marketsArray,
+      );
+  
+      await Exchange.load(loadExchangeConfig, longWallet);
+      logger.info("Exchange loaded successfully");
+  
+      await this.setupPriorityFees();
+      Exchange.setUseAutoPriorityFee(false);
+      await this.updatePriorityFees();
+  
+      // Initialize both clients
+      this.longClient = await CrossClient.load(
+        this.connection,
+        longWallet,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+        undefined
+      );
+  
+      this.shortClient = await CrossClient.load(
+        this.connection,
+        shortWallet,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+        undefined
+      );
+  
+      logger.info("Both clients initialized successfully");
+  
+      // Check existing positions
+      await this.checkExistingPositions();
+  
+      // Setup websocket and monitoring
+      this.setupWebSocket();
+      this.setupHealthCheck();
+  
+      logger.info("Trading system initialized successfully", {
+        symbols: this.symbols,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      logger.error("Initialization error:", error);
+      throw error;
+    }
+  }
+  
+  loadKeypair(keypairPath) {
+    const secretKeyString = fs.readFileSync(keypairPath, "utf8");
+    const secretKey = Uint8Array.from(JSON.parse(secretKeyString));
+    return Keypair.fromSecretKey(secretKey);
+  }
 
-			// Load wallet
-			const secretKeyString = fs.readFileSync(keyPath, "utf8");
-			const secretKey = Uint8Array.from(JSON.parse(secretKeyString));
-			const keypair = Keypair.fromSecretKey(secretKey);
-			this.wallet = new Wallet(keypair);
+  async getPosition(marketIndex, direction = "long") {
+    try {
+      const client = direction === "long" ? this.longClient : this.shortClient;
+      if (!client) {
+        logger.error(`Client not initialized for ${direction} direction`);
+        return null;
+      }
+      
+      await client.updateState();
+      const positions = client.getPositions(marketIndex);
+      return positions[0] || null;
+    } catch (error) {
+      logger.error(`Error getting ${direction} position:`, error);
+      throw error;
+    }
+  }
 
-			logger.info("Wallet initialized", { usingPath: keyPath });
+  async handleTradeSignal(signalData) {
+    try {
+      // Log initial signal
+      console.log(`Processing signal for ${signalData.symbol}:`, {
+        direction: signalData.direction,
+        signal: signalData.signal
+      });
 
-			// Create client
-			this.client = await CrossClient.load(
-				this.connection,
-				this.wallet,
-				undefined,
-				undefined,
-				undefined,
-				undefined,
-				true,
-				undefined
-			);
+      const direction = signalData.direction === 1 ? "long" : "short";
+      const marketIndex = constants.Asset[signalData.symbol];
 
-			logger.info("ZetaClientWrapper initialized successfully");
-		} catch (error) {
-			logger.error("Initialization error:", error);
-			throw error;
-		}
-	}
+      // Only proceed if signal is NOT 0 (0 means close/don't open)
+      if (signalData.signal === 0) {
+        console.log(`[${signalData.symbol}] Signal is 0, not opening position`);
+        return;
+      }
 
-	async initializeExchange(markets) {
-		try {
-			const connection = new Connection(process.env.RPC_TRADINGBOT);
+      // Check if we already have a position
+      const position = await this.getPosition(marketIndex, direction);
+      if (position && ((direction === "long" && position.size > 0) || 
+                      (direction === "short" && position.size < 0))) {
+        logger.info(`Already have ${direction} position for ${signalData.symbol}`, {
+          size: position.size,
+          entryPrice: position.costOfTrades ? (position.costOfTrades / position.size).toFixed(4) : "N/A"
+        });
+        return;
+      }
 
-			// Create set of markets to load
-			const marketsToLoad = new Set([constants.Asset.SOL, ...markets]);
-			const marketsArray = Array.from(marketsToLoad);
+      // Check for existing monitoring/processing
+      if (this.monitoringState.has(marketIndex)) {
+        logger.info(`[${signalData.symbol}] Market already being monitored/processed`);
+        return;
+      }
+      
+      // Log intent to open
+      logger.info(`Opening ${direction} position for ${signalData.symbol}`, {
+        marketIndex,
+        direction,
+        signal: signalData.signal
+      });
 
-			const loadExchangeConfig = types.defaultLoadExchangeConfig(
-				Network.MAINNET,
-				connection,
-				{
-					skipPreflight: true,
-					preflightCommitment: "finalized",
-					commitment: "finalized",
-				},
-				150,
-				true,
-				connection,
-				marketsArray,
-				undefined,
-				marketsArray
-			);
+      // Open position
+      const txid = await this.openPosition(direction, marketIndex);
 
-			await Exchange.load(loadExchangeConfig);
-			logger.info("Exchange loaded successfully");
+      // Wait for position to be confirmed
+      await utils.sleep(2000);
+      const newPosition = await this.getPosition(marketIndex, direction);
+      if (!newPosition) {
+        logger.error(`Failed to verify position creation for ${signalData.symbol}`);
+        return;
+      }
 
-			this.setupPriorityFees();
-			this.updatePriorityFees();
+      // Start monitoring
+      this.startMonitoring(marketIndex, newPosition);
 
-			return { connection };
-		} catch (error) {
-			logger.error("Error initializing exchange:", error);
-			throw error;
-		}
-	}
+    } catch (error) {
+      logger.error("Error handling trade signal:", error, {
+        symbol: signalData.symbol,
+        direction: signalData.direction,
+        signal: signalData.signal
+      });
+    }
+  }
+  
+  setupWebSocket() {
+    const WS_HOST = process.env.WS_HOST || "api.nosol.lol";
+    const WS_PORT = process.env.WS_PORT || 8080;
+    const API_KEY = process.env.WS_API_KEY;
+
+    if (this.ws) {
+      this.ws.terminate();
+    }
+
+    this.ws = new WebSocket(`ws://${WS_HOST}:${WS_PORT}?apiKey=${API_KEY}`);
+
+    this.ws.on("open", () => {
+      this.connectionActive = true;
+      this.reconnectAttempts = 0;
+      logger.info("Connected to signal stream");
+
+      this.symbols.forEach((symbol) => {
+        ["long", "short"].forEach(direction => {
+          this.ws.send(JSON.stringify({
+            type: "subscribe",
+            symbol,
+            direction
+          }));
+        });
+        logger.info(`Subscribed to ${symbol} signals for both directions`);
+      });
+    });
+
+    this.ws.on("message", async (data) => {
+      try {
+        const signalData = JSON.parse(data.toString());
+
+        if (signalData.type === "connection") {
+          logger.info("Server acknowledged connection", {
+            availableSymbols: signalData.symbols,
+          });
+          return;
+        }
+
+        if (!this.symbols.includes(signalData.symbol)) return;
+
+        if (this.messageQueue.length >= this.MAX_QUEUE_SIZE) {
+          this.messageQueue.shift();
+        }
+
+        this.messageQueue.push(signalData);
+        console.log(`Queued signal for ${signalData.symbol}`);
+
+        await this.processMessageQueue();
+      } catch (error) {
+        logger.error("Error processing message:", error);
+      }
+    });
+
+    this.ws.on("error", (error) => {
+      logger.error("WebSocket error:", error.message);
+      this.connectionActive = false;
+    });
+
+    this.ws.on("close", (code, reason) => {
+      this.connectionActive = false;
+      logger.info(`Connection closed (${code}): ${reason}`);
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        this.reconnect();
+      }
+    });
+  }
+
+  async processMessageQueue() {
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
+
+    try {
+      while (this.messageQueue.length > 0) {
+        const signalData = this.messageQueue.shift();
+        if (!signalData?.symbol || signalData.direction === undefined) {
+          logger.info("Skipping invalid message:", signalData);
+          continue;
+        }
+        await this.handleTradeSignal(signalData);
+      }
+    } finally {
+      this.isProcessingQueue = false;
+    }
+  }
+
+  reconnect() {
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      logger.info(`Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+      setTimeout(() => this.setupWebSocket(), 5000);
+    }
+  }
+
+  setupHealthCheck() {
+    this.healthCheckInterval = setInterval(() => {
+      if (!this.connectionActive) {
+        logger.info("WebSocket disconnected, attempting reconnect");
+        this.reconnect();
+      }
+
+      logger.info("System Status:", {
+        wsConnected: this.connectionActive,
+        queueLength: this.messageQueue.length,
+        reconnectAttempts: this.reconnectAttempts,
+        timestamp: new Date().toISOString(),
+      });
+    }, 300000); // 5 minutes
+  }
+
+  shutdown() {
+    logger.info("Initiating graceful shutdown");
+    clearInterval(this.healthCheckInterval);
+
+    if (this.ws) {
+      this.ws.close();
+    }
+
+    this.longClient = null;
+    this.shortClient = null;
+    
+    logger.info("Shutdown complete");
+  }
 
 	async setupPriorityFees() {
 		try {
@@ -239,22 +484,77 @@ export class ZetaClientWrapper {
 		}
 	}
 
-	async getPosition(marketIndex) {
-		try {
-			await this.client.updateState();
-			const positions = this.client.getPositions(marketIndex);
-			console.log("Position check:", {
-				marketIndex,
-				hasPosition: !!positions[0],
-				size: positions[0]?.size || 0,
-			});
-			return positions[0] || null;
-		} catch (error) {
-			logger.error("Error getting position:", error);
-			throw error;
-		}
-	}
 
+
+  async checkExistingPositions() {
+    for (const symbol of this.symbols) {
+      try {
+        const marketIndex = constants.Asset[symbol];
+
+        // Check long positions
+        const longPosition = await this.getPosition(marketIndex, "long");
+        if (longPosition && longPosition.size > 0) {
+          logger.info(`Found existing long position for ${symbol}`, {
+            size: longPosition.size,
+            entryPrice: longPosition.costOfTrades 
+              ? (longPosition.costOfTrades / longPosition.size).toFixed(4)
+              : "N/A",
+          });
+
+          const longTriggerOrders = await this.getTriggerOrders(marketIndex, "long");
+          if (longTriggerOrders.length === 0) {
+            logger.warn(`Long position without trigger orders for ${symbol}`);
+          } else {
+            this.startMonitoring(marketIndex, longPosition);
+          }
+        } else {
+          // Cancel any existing trigger orders if no position exists
+          await this.cancelTriggerOrders(marketIndex, 'long');
+        }
+
+        // Check short positions
+        const shortPosition = await this.getPosition(marketIndex, "short");
+        if (shortPosition && shortPosition.size < 0) {
+          logger.info(`Found existing short position for ${symbol}`, {
+            size: shortPosition.size,
+            entryPrice: shortPosition.costOfTrades 
+              ? (shortPosition.costOfTrades / shortPosition.size).toFixed(4)
+              : "N/A",
+          });
+
+          const shortTriggerOrders = await this.getTriggerOrders(marketIndex, "short");
+          if (shortTriggerOrders.length === 0) {
+            logger.warn(`Short position without trigger orders for ${symbol}`);
+          } else {
+            this.startMonitoring(marketIndex, shortPosition);
+          }
+        } else {
+          // Cancel any existing trigger orders if no position exists
+          await this.cancelTriggerOrders(marketIndex, 'short');
+        }
+
+        await utils.sleep(250); // Jitter between symbols
+      } catch (error) {
+        logger.error(`Error checking ${symbol} positions:`, error);
+      }
+    }
+  }
+
+  async getTriggerOrders(marketIndex, direction = "long") {
+    try {
+      const client = direction === "long" ? this.longClient : this.shortClient;
+      if (!client) {
+        logger.error(`Client not initialized for ${direction} direction`);
+        return [];
+      }
+      
+      return client.getTriggerOrders(marketIndex);
+    } catch (error) {
+      logger.error(`Error getting ${direction} trigger orders:`, error);
+      throw error;
+    }
+  }
+  
 	getCalculatedMarkPrice(asset = this.activeMarket) {
 		try {
 			Exchange.getPerpMarket(asset).forceFetchOrderbook();
@@ -271,340 +571,269 @@ export class ZetaClientWrapper {
 		}
 	}
 
-	async adjustStopLossOrder(newPrices, asset, positionSize) {
-		try {
-			logger.info("Starting stop loss adjustment process", {
-				asset: assets.assetToName(asset),
-				positionSize: positionSize?.toString(),
-				hasNewPrices: !!newPrices,
-			});
 
-			// Get current trigger orders
-			const triggerOrders = await this.getTriggerOrders(asset);
-			logger.info("Retrieved current trigger orders", {
-				totalOrders: triggerOrders?.length || 0,
-				orderTypes: triggerOrders?.map((order) => ({
-					bit: order.triggerOrderBit,
-					side: order.side === types.Side.BID ? "BID" : "ASK",
-					direction:
-						order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
-							? "GREATER_THAN_OR_EQUAL"
-							: "LESS_THAN_OR_EQUAL",
-				})),
-			});
+  
 
-			const isShort = positionSize < 0;
+  
+  async openPosition(direction, marketIndex = constants.Asset.SOL, makerOrTaker = "maker") {
+    try {
+      logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
+      const txid = await this.openPositionWithTPSLVersioned(direction, marketIndex, makerOrTaker);
 
-			// Find the stop loss order with detailed logging
-			logger.info("Searching for stop loss order", {
-				positionType: isShort ? "SHORT" : "LONG",
-				expectedDirection: isShort
-					? "GREATER_THAN_OR_EQUAL"
-					: "LESS_THAN_OR_EQUAL",
-			});
+      if (!txid) {
+        throw new Error("No transaction ID returned");
+      }
 
-			const stopLoss = triggerOrders.find((order) =>
-				isShort
-					? order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
-					: order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
-			);
+      // Get the new position and start monitoring
+      await utils.sleep(2000); // Wait for position to be confirmed
+      const position = await this.getPosition(marketIndex, direction);
+      if (position) {
+        this.startMonitoring(marketIndex, position);
+      }
 
-			if (!stopLoss) {
-				logger.error("Stop loss order not found in current orders");
-				throw new Error("Stop loss order not found");
-			}
+      logger.info(`Position opened successfully`, {
+        direction,
+        asset: assets.assetToName(marketIndex),
+        txid,
+      });
 
-			logger.info("Found existing stop loss order", {
-				orderDetails: {
-					bit: stopLoss.triggerOrderBit,
-					currentOrderPrice: this.roundToTickSize(stopLoss.orderPrice / 1e6),
-					currentTriggerPrice: this.roundToTickSize(
-						stopLoss.triggerPrice / 1e6
-					),
-					size: stopLoss.size.toString(),
-					side: stopLoss.side === types.Side.BID ? "BID" : "ASK",
-					direction:
-						stopLoss.triggerDirection ===
-						types.TriggerDirection.GREATERTHANOREQUAL
-							? "GREATER_THAN_OR_EQUAL"
-							: "LESS_THAN_OR_EQUAL",
-				},
-			});
+      return txid;
+    } catch (error) {
+      const errorContext = {
+        direction,
+        asset: assets.assetToName(marketIndex),
+        type: error.name,
+        details: error.message,
+        code: error.code,
+        timestamp: new Date().toISOString(),
+      };
 
-			if (
-				!newPrices?.orderPrice ||
-				!newPrices?.triggerPrice ||
-				typeof newPrices.orderPrice !== "number" ||
-				typeof newPrices.triggerPrice !== "number"
-			) {
-				logger.error("Invalid price inputs", {
-					receivedPrices: newPrices,
-					orderPriceType: typeof newPrices?.orderPrice,
-					triggerPriceType: typeof newPrices?.triggerPrice,
-				});
-				throw new Error("Invalid price inputs for stop loss adjustment");
-			}
+      logger.error(`Failed to open ${direction} position for ${assets.assetToName(marketIndex)}`, errorContext);
+      throw new Error(`Position opening failed: ${error.message}`);
+    }
+  }
 
-			// Log price transformation process
-			logger.info("Processing new prices", {
-				input: {
-					orderPrice: newPrices.orderPrice,
-					triggerPrice: newPrices.triggerPrice,
-				},
-				decimalConversion: {
-					orderPrice: newPrices.orderPrice / 1e6,
-					triggerPrice: newPrices.triggerPrice / 1e6,
-				},
-			});
 
-			// Round the prices to tick size before converting to native integer
-			const orderPriceDecimal = this.roundToTickSize(
-				newPrices.orderPrice / 1e6
-			);
-			const triggerPriceDecimal = this.roundToTickSize(
-				newPrices.triggerPrice / 1e6
-			);
+  async processSignal(signalData) {
+    try {
+      const marketIndex = constants.Asset[signalData.symbol];
+      const currentPosition = await this.getPosition(marketIndex);
+  
+      // If no position exists and we have a valid signal, open new position
+      if (!currentPosition || currentPosition.size === 0) {
+        if (signalData.signal !== 0) {
+          await this.openNewPosition(signalData);
+        }
+        return;
+      }
+  
+      // Start monitoring if not already monitoring
+      if (!this.monitoringState.has(marketIndex)) {
+        logger.info(`[${signalData.symbol}] Starting position monitoring`, {
+          size: currentPosition.size,
+          direction: currentPosition.size > 0 ? "LONG" : "SHORT"
+        });
+  
+        this.monitoringState.set(marketIndex, {
+          isMonitoring: true,
+          interval: setInterval(() => this.monitorPosition(currentPosition, marketIndex), 
+            MONITORING_INTERVALS.ACTIVE_POSITION)
+        });
+      }
+    } catch (error) {
+      logger.error(`[TRADE] Error processing signal:`, error);
+    }
+  }
+  
+  startMonitoring(marketIndex, position) {
+    const direction = position.size > 0 ? "long" : "short";
+    const monitoringKey = `${marketIndex}-${direction}`;
 
-			const orderPriceNative =
-				utils.convertDecimalToNativeInteger(orderPriceDecimal);
-			const triggerPriceNative =
-				utils.convertDecimalToNativeInteger(triggerPriceDecimal);
+    if (this.monitoringState.has(monitoringKey)) {
+      logger.info(`Already monitoring ${direction} position for ${assets.assetToName(marketIndex)}`);
+      return;
+    }
 
-			logger.info("Price conversion complete", {
-				orderPrice: {
-					raw: newPrices.orderPrice,
-					decimal: orderPriceDecimal,
-					native: orderPriceNative.toString(),
-				},
-				triggerPrice: {
-					raw: newPrices.triggerPrice,
-					decimal: triggerPriceDecimal,
-					native: triggerPriceNative.toString(),
-				},
-			});
+    logger.info(`Starting ${direction} position monitoring for ${assets.assetToName(marketIndex)}`, {
+      size: position.size,
+      direction: position.size > 0 ? "LONG" : "SHORT"
+    });
 
-			logger.info("Preparing trigger order modification", {
-				bit: stopLoss.triggerOrderBit,
-				currentState: {
-					orderPrice: this.roundToTickSize(stopLoss.orderPrice / 1e6),
-					triggerPrice: this.roundToTickSize(stopLoss.triggerPrice / 1e6),
-				},
-				newState: {
-					orderPrice: orderPriceDecimal,
-					triggerPrice: triggerPriceDecimal,
-				},
-				orderDetails: {
-					size: stopLoss.size.toString(),
-					side: stopLoss.side === types.Side.BID ? "BID" : "ASK",
-					direction:
-						stopLoss.triggerDirection ===
-						types.TriggerDirection.GREATERTHANOREQUAL
-							? "GREATER_THAN_OR_EQUAL"
-							: "LESS_THAN_OR_EQUAL",
-				},
-			});
+    const interval = setInterval(() => this.monitorPosition(position, marketIndex, direction), 3000);
+    this.monitoringState.set(monitoringKey, { interval });
+  }
 
-			await this.client.updateState();
+  stopMonitoring(marketIndex, direction) {
+    const monitoringKey = `${marketIndex}-${direction}`;
+    const state = this.monitoringState.get(monitoringKey);
+    if (state?.interval) {
+      clearInterval(state.interval);
+      this.monitoringState.delete(monitoringKey);
+      logger.info(`Stopped monitoring ${direction} position for ${assets.assetToName(marketIndex)}`);
+    }
+  }
 
-			const tx = await this.client.editPriceTriggerOrder(
-				stopLoss.triggerOrderBit,
-				orderPriceNative,
-				triggerPriceNative,
-				stopLoss.size,
-				stopLoss.side,
-				stopLoss.triggerDirection,
-				stopLoss.orderType,
-				{
-					reduceOnly: true,
-					tag: constants.DEFAULT_ORDER_TAG,
-				}
-			);
+  async monitorPosition(position, marketIndex, direction) {
+    try {
+      const settings = await this.fetchSettings();
+      const { trailingStopLoss } = settings;
 
-			logger.info("Stop loss adjustment transaction completed", {
-				success: true,
-				txid: tx,
-				finalOrderDetails: {
-					bit: stopLoss.triggerOrderBit,
-					newOrderPrice: orderPriceDecimal,
-					newTriggerPrice: triggerPriceDecimal,
-					size: stopLoss.size.toString(),
-					side: stopLoss.side === types.Side.BID ? "BID" : "ASK",
-					direction:
-						stopLoss.triggerDirection ===
-						types.TriggerDirection.GREATERTHANOREQUAL
-							? "GREATER_THAN_OR_EQUAL"
-							: "LESS_THAN_OR_EQUAL",
-				},
-			});
+      // Verify position still exists
+      const currentPosition = await this.getPosition(marketIndex, direction);
+      if (!currentPosition || currentPosition.size === 0) {
+        this.stopMonitoring(marketIndex, direction);
+        return;
+      }
 
-			return true;
-		} catch (error) {
-			logger.error("Failed to adjust stop loss", {
-				error: error.message,
-				errorType: error.name,
-				stack: error.stack,
-			});
-			throw error;
-		}
-	}
+      const triggerOrders = await this.getTriggerOrders(marketIndex, direction);
+      const isShort = currentPosition.size < 0;
 
-	async checkPositionProgress() {
-		try {
-			if (this.positionState.hasAdjustedStopLoss) {
-				this.stopPositionMonitoring();
-				return;
-			}
+      const stopLoss = triggerOrders.find((order) =>
+        isShort
+          ? order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
+          : order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
+      );
+      const takeProfit = triggerOrders.find((order) =>
+        isShort
+          ? order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
+          : order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
+      );
 
-			await this.client.updateState();
+      if (!stopLoss || !takeProfit) {
+        logger.info(`No stop loss or take profit found, stopping monitoring`);
+        this.stopMonitoring(marketIndex, direction);
+        return;
+      }
 
-			const positions = this.client.getPositions(
-				this.positionState.marketIndex
-			);
-			const currentPosition = positions[0];
+      const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
+      const currentPrice = this.getCalculatedMarkPrice(marketIndex);
+      const takeProfitPrice = takeProfit.orderPrice / 1e6;
+      const currentStopLossPrice = stopLoss.orderPrice / 1e6;
 
-			if (!currentPosition) {
-				logger.info("Position closed, stopping monitoring");
-				this.stopPositionMonitoring();
-				return;
-			}
+      // Calculate progress
+      const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
+      const currentProgress = isShort
+        ? entryPrice - currentPrice
+        : currentPrice - entryPrice;
+      const progressPercent = currentProgress / totalDistanceToTP;
 
-			const currentPrice = await this.getCalculatedMarkPrice(
-				this.positionState.marketIndex
-			);
-			const newStopLossPrices = this.calculateTrailingStopLoss(currentPrice);
+      // Only log if price has changed
+      if (this.lastCheckedPrice !== currentPrice) {
+        console.log(`Position progress update:`, {
+          marketIndex,
+          direction: isShort ? "SHORT" : "LONG",
+          entryPrice: entryPrice.toFixed(4),
+          currentPrice: currentPrice.toFixed(4),
+          stopLossPrice: currentStopLossPrice.toFixed(4),
+          takeProfitPrice: takeProfitPrice.toFixed(4),
+          progress: (progressPercent * 100).toFixed(2) + "%",
+          thresholdNeeded: (trailingStopLoss.progressThreshold * 100).toFixed(2) + "%"
+        });
+        this.lastCheckedPrice = currentPrice;
+      }
 
-			if (newStopLossPrices) {
-				const adjustmentSuccess = await this.adjustStopLossOrder(
-					newStopLossPrices
-				);
-				if (!adjustmentSuccess) {
-					throw new Error("Failed to adjust stop loss");
-				}
+      // Check if we should close position
+      if (progressPercent >= trailingStopLoss.progressThreshold) {
+        // TODO: await this.closePosition(marketIndex, direction);
+        this.stopMonitoring(marketIndex, direction);
+      }
+    } catch (error) {
+      logger.error(`Error in position monitoring:`, error);
+    }
+  }
+  
+  // New helper method to adjust stop loss
+  async adjustStopLoss(marketIndex, position, currentPrice, entryPrice, 
+    takeProfitPrice, trailingStopLoss) {
+    this.isAdjusting = true;
+  
+    try {
+      const isShort = position.size < 0;
+      const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
+  
+      const newStopLoss = this.roundToTickSize(
+        isShort
+          ? entryPrice - totalDistanceToTP * trailingStopLoss.stopLossDistance
+          : entryPrice + totalDistanceToTP * trailingStopLoss.stopLossDistance
+      );
+  
+      const newTrigger = this.roundToTickSize(
+        isShort
+          ? entryPrice - totalDistanceToTP * trailingStopLoss.triggerDistance
+          : entryPrice + totalDistanceToTP * trailingStopLoss.triggerDistance
+      );
+  
+      logger.info(`Adjusting stop loss:`, {
+        marketIndex,
+        currentPrice: currentPrice.toFixed(4),
+        newStopLoss: newStopLoss.toFixed(4),
+        newTrigger: newTrigger.toFixed(4)
+      });
+  
+      const newPrices = {
+        orderPrice: utils.convertDecimalToNativeInteger(newStopLoss),
+        triggerPrice: utils.convertDecimalToNativeInteger(newTrigger)
+      };
+  
+      const adjustmentSuccess = await this.adjustStopLossOrder(
+        newPrices,
+        marketIndex,
+        position.size
+      );
+  
+      if (adjustmentSuccess) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        await this.client.updateState();
+        this.stopMonitoring(marketIndex);
+      }
+    } finally {
+      this.isAdjusting = false;
+    }
+  }
+  
+  stopMonitoring(marketIndex) {
+    const state = this.monitoringState.get(marketIndex);
+    if (state?.interval) {
+      clearInterval(state.interval);
+      this.monitoringState.delete(marketIndex);
+      logger.info(`Stopped monitoring for market ${marketIndex}`);
+    }
+  }
+  
+  
+  async cancelTriggerOrders(marketIndex, direction = "long") {
+    const client = direction === "long" ? this.longClient : this.shortClient;
+    await client.updateState();
 
-				const verificationSuccess = await this.verifyStopLossAdjustment(
-					newStopLossPrices
-				);
-				if (!verificationSuccess) {
-					throw new Error("Stop loss adjustment failed verification");
-				}
+    const openTriggerOrders = await this.getTriggerOrders(marketIndex, direction);
+    if (openTriggerOrders && openTriggerOrders.length > 0) {
+      logger.info(`Found Trigger Orders for ${direction}, Cancelling...`, openTriggerOrders);
 
-				this.positionState.hasAdjustedStopLoss = true;
-				this.stopPositionMonitoring();
-			}
-		} catch (error) {
-			logger.error("Error checking position progress:", error);
-			throw error;
-		}
-	}
+      for (const triggerOrder of openTriggerOrders) {
+        await client.cancelTriggerOrder(triggerOrder.triggerOrderBit);
+      }
 
-	async openPosition(
-		direction,
-		marketIndex = constants.Asset.SOL,
-		makerOrTaker = "maker"
-	) {
-		try {
-			logger.info(
-				`Opening ${direction} position for ${assets.assetToName(marketIndex)}`
-			);
-			const txid = await this.openPositionWithTPSLVersioned(
-				direction,
-				marketIndex,
-				makerOrTaker
-			);
+      logger.info(`${direction} Trigger Orders Cancelled.`);
+    }
+  }
+  async openPositionWithTPSLVersioned(direction, marketIndex, makerOrTaker = "maker") {
+    try {
+      const client = direction === "long" ? this.longClient : this.shortClient;
+      logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
 
-			if (!txid) {
-				throw new Error("No transaction ID returned");
-			}
+      const settings = this.fetchSettings();
+      logger.info(`Using settings:`, settings);
 
-			logger.info(`Position opened successfully`, {
-				direction,
-				asset: assets.assetToName(marketIndex),
-				txid,
-			});
+      const balance = Exchange.riskCalculator.getCrossMarginAccountState(client.account).balance;
+      const side = direction === "long" ? types.Side.BID : types.Side.ASK;
 
-			return txid;
-		} catch (error) {
-			// Categorize and enhance the error
-			const errorContext = {
-				direction,
-				asset: assets.assetToName(marketIndex),
-				type: error.name,
-				details: error.message,
-				code: error.code, // If provided by SDK
-				timestamp: new Date().toISOString(),
-			};
+      const { currentPrice, adjustedPrice, positionSize, nativeLotSize } =
+        this.calculatePricesAndSize(side, marketIndex, balance, settings, "taker");
 
-			// Log a single, comprehensive error message
-			logger.error(
-				`Failed to open ${direction} position for ${assets.assetToName(
-					marketIndex
-				)}`,
-				errorContext
-			);
+      const { takeProfitPrice, takeProfitTrigger, stopLossPrice, stopLossTrigger } = 
+        this.calculateTPSLPrices(direction, adjustedPrice, settings);
 
-			// Rethrow a cleaner error for upper layers
-			throw new Error(`Position opening failed: ${error.message}`);
-		}
-	}
-
-	async openPositionWithTPSLVersioned(
-		direction,
-		marketIndex = this.activeMarket,
-		makerOrTaker = "maker"
-	) {
-		try {
-			logger.info(
-				`Opening ${direction} position for ${assets.assetToName(marketIndex)}`
-			);
-
-			const openTriggerOrders = await this.getTriggerOrders(marketIndex);
-			// Keep track of cancelled bits to avoid reuse
-			const cancelledBits = [];
-
-			if (openTriggerOrders && openTriggerOrders.length > 0) {
-				logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
-
-				// this.updatePriorityFees();
-				const triggerOrderTxs = [];
-
-				for (const triggerOrder of openTriggerOrders) {
-					await this.client.updateState(true, true);
-					const tx = await this.client.cancelTriggerOrder(
-						triggerOrder.triggerOrderBit
-					);
-					cancelledBits.push(triggerOrder.triggerOrderBit);
-					triggerOrderTxs.push(tx);
-				}
-
-				logger.info("Trigger Orders Cancelled. Waiting 3s...", triggerOrderTxs);
-        utils.sleep(3000);
-			}
-
-			const settings = this.fetchSettings();
-			logger.info(`Using settings:`, settings);
-
-			const balance = Exchange.riskCalculator.getCrossMarginAccountState(
-				this.client.account
-			).balance;
-			const side = direction === "long" ? types.Side.BID : types.Side.ASK;
-
-			const { currentPrice, adjustedPrice, positionSize, nativeLotSize } =
-				this.calculatePricesAndSize(
-					side,
-					marketIndex,
-					balance,
-					settings,
-					"taker"
-				);
-
-			const {
-				takeProfitPrice,
-				takeProfitTrigger,
-				stopLossPrice,
-				stopLossTrigger,
-			} = this.calculateTPSLPrices(direction, adjustedPrice, settings);
-
-			logger.info(`
+      logger.info(`
 Opening ${direction} position:
 ------------------------------
     Take Profit ⟶ $${takeProfitPrice}
@@ -618,89 +847,69 @@ Opening ${direction} position:
       SL Price ⟶ $${stopLossPrice}
 ------------------------------`);
 
-			// this.updatePriorityFees();
+      await this.updatePriorityFees();
+      await client.updateState(true, true);
 
-			await this.client.updateState(true, true);
+      let transaction = new Transaction().add(
+        ComputeBudgetProgram.setComputeUnitLimit({
+          units: 450_000,
+        })
+      );
 
-			let transaction = new Transaction().add(
-				ComputeBudgetProgram.setComputeUnitLimit({
-					units: 450_000,
-				})
-			);
+      let triggerBit_TP = client.findAvailableTriggerOrderBit();
+      let triggerBit_SL = client.findAvailableTriggerOrderBit(triggerBit_TP + 1);
 
-			let triggerBit_TP = this.client.findAvailableTriggerOrderBit();
-			let triggerBit_SL = this.client.findAvailableTriggerOrderBit(
-				triggerBit_TP + 1
-			);
+      const mainOrderIx = this.createMainOrderInstruction(
+        marketIndex,
+        adjustedPrice,
+        nativeLotSize,
+        side,
+        "taker",
+        direction
+      );
 
-			// Forcefully increment bits if they collide with cancelled ones or exceed 127
-			while (
-				cancelledBits.includes(triggerBit_TP) ||
-				cancelledBits.includes(triggerBit_SL) ||
-				triggerBit_SL > 127
-			) {
-				triggerBit_TP = (triggerBit_TP + 1) % 128;
-				triggerBit_SL = (triggerBit_TP + 1) % 128;
-			}
+      const tpOrderIx = this.createTPOrderInstruction(
+        direction,
+        marketIndex,
+        takeProfitPrice,
+        takeProfitTrigger,
+        nativeLotSize,
+        triggerBit_TP
+      );
 
-			const mainOrderIx = this.createMainOrderInstruction(
-				marketIndex,
-				adjustedPrice,
-				nativeLotSize,
-				side,
-				"taker"
-			);
-			const tpOrderIx = this.createTPOrderInstruction(
-				direction,
-				marketIndex,
-				takeProfitPrice,
-				takeProfitTrigger,
-				nativeLotSize,
-				triggerBit_TP
-			);
-			const slOrderIx = this.createSLOrderInstruction(
-				direction,
-				marketIndex,
-				stopLossPrice,
-				stopLossTrigger,
-				nativeLotSize,
-				triggerBit_SL
-			);
+      const slOrderIx = this.createSLOrderInstruction(
+        direction,
+        marketIndex,
+        stopLossPrice,
+        stopLossTrigger,
+        nativeLotSize,
+        triggerBit_SL
+      );
 
-			transaction.add(mainOrderIx);
-			transaction.add(tpOrderIx);
-			transaction.add(slOrderIx);
+      transaction.add(mainOrderIx);
+      transaction.add(tpOrderIx);
+      transaction.add(slOrderIx);
 
+      const txid = await utils.processTransaction(
+        client.provider,
+        transaction,
+        undefined,
+        {
+          skipPreflight: true,
+          preflightCommitment: "finalized",
+          commitment: "finalized",
+        },
+        false,
+        utils.getZetaLutArr()
+      );
 
-			const txid = await utils.processTransaction(
-				this.client.provider,
-				transaction,
-				undefined,
-				{
-					skipPreflight: true,
-					preflightCommitment: "finalized",
-					commitment: "finalized",
-				},
-				false,
-				utils.getZetaLutArr()
-			);
-
-			logger.info(`Transaction sent successfully. txid: ${txid}`);
-			return txid;
-		} catch (error) {
-			logger.error("Error opening position with TP/SL:", error);
-			throw error;
-		}
-	}
-
-	getTriggerOrders(marketIndex = this.activeMarket) {
-		try {
-			return this.client.getTriggerOrders(marketIndex);
-		} catch (error) {
-			logger.error("Error getting trigger orders:", error);
-			throw error;
-		}
-	}
+      logger.info(`Transaction sent successfully. txid: ${txid}`);
+      return txid;
+    } catch (error) {
+      logger.error("Error opening position with TP/SL:", error);
+      throw error;
+    }
+  }
 
 	fetchSettings() {
 		// logger.info("Using settings:", this.settings); // Debug log
@@ -735,7 +944,7 @@ Opening ${direction} position:
 			: price + (stopLossPrice - price) * 0.95; // Short: Entry + 95% of distance to SL
 
 		// Log calculations for verification
-		logger.info("TP/SL Price Calculations:", {
+		console.log("TP/SL Price Calculations:", {
 			direction,
 			entryPrice: price,
 			takeProfit: {
@@ -867,302 +1076,135 @@ Opening ${direction} position:
 		};
 	}
 
-	createMainOrderInstruction(
-		marketIndex,
-		adjustedPrice,
-		nativeLotSize,
-		side,
-		makerOrTaker = "maker"
-	) {
-		// adjustedPrice comes in as a decimal value (e.g., 232.30)
-		// We convert it directly to native format without additional division
-		const nativePrice = utils.convertDecimalToNativeInteger(adjustedPrice);
+  createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "maker", direction = "long") {
+    const client = direction === "long" ? this.longClient : this.shortClient;
+    const nativePrice = utils.convertDecimalToNativeInteger(adjustedPrice);
 
-		logger.info("Creating main order instruction:", {
-			market: assets.assetToName(marketIndex),
-			priceInfo: {
-				originalPrice: adjustedPrice,
-				nativePrice: nativePrice.toString(),
-			},
-			sizeInfo: {
-				nativeLotSize: nativeLotSize.toString(),
-			},
-			orderDetails: {
-				side: side === types.Side.BID ? "BID" : "ASK",
-				type: makerOrTaker === "maker" ? "POST_ONLY_SLIDE" : "LIMIT",
-				expiryOffset: 180,
-			},
-		});
+    logger.info("Creating main order instruction:", {
+      market: assets.assetToName(marketIndex),
+      priceInfo: {
+        originalPrice: adjustedPrice,
+        nativePrice: nativePrice.toString(),
+      },
+      sizeInfo: {
+        nativeLotSize: nativeLotSize.toString(),
+      },
+      orderDetails: {
+        side: side === types.Side.BID ? "BID" : "ASK",
+        type: makerOrTaker === "maker" ? "POST_ONLY_SLIDE" : "LIMIT",
+        expiryOffset: 180,
+      },
+    });
 
-		return this.client.createPlacePerpOrderInstruction(
-			marketIndex,
-			nativePrice,
-			nativeLotSize,
-			side,
-			{
-				orderType:
-					makerOrTaker === "maker"
-						? types.OrderType.POSTONLYSLIDE
-						: types.OrderType.LIMIT,
-				tifOptions: {
-					expiryOffset: 180,
-				},
-			}
-		);
-	}
+    return client.createPlacePerpOrderInstruction(
+      marketIndex,
+      nativePrice,
+      nativeLotSize,
+      side,
+      {
+        orderType: makerOrTaker === "maker" ? types.OrderType.POSTONLYSLIDE : types.OrderType.LIMIT,
+        tifOptions: {
+          expiryOffset: 180,
+        },
+      }
+    );
+  }
+  createTPOrderInstruction(direction, marketIndex, takeProfitPrice, takeProfitTrigger, nativeLotSize, triggerOrderBit = 0) {
+    const client = direction === "long" ? this.longClient : this.shortClient;
+    const tp_side = direction === "long" ? types.Side.ASK : types.Side.BID;
+    const triggerDirection =
+      direction === "long"
+        ? types.TriggerDirection.GREATERTHANOREQUAL
+        : types.TriggerDirection.LESSTHANOREQUAL;
 
-	createTPOrderInstruction(
-		direction,
-		marketIndex,
-		takeProfitPrice,
-		takeProfitTrigger,
-		nativeLotSize,
-		triggerOrderBit = 0
-	) {
-		// These prices come in as decimal values, ready for native conversion
-		const tp_side = direction === "long" ? types.Side.ASK : types.Side.BID;
-		const triggerDirection =
-			direction === "long"
-				? types.TriggerDirection.GREATERTHANOREQUAL
-				: types.TriggerDirection.LESSTHANOREQUAL;
+    const nativeTakeProfit = utils.convertDecimalToNativeInteger(takeProfitPrice);
+    const nativeTrigger = utils.convertDecimalToNativeInteger(takeProfitTrigger);
 
-		const nativeTakeProfit =
-			utils.convertDecimalToNativeInteger(takeProfitPrice);
-		const nativeTrigger =
-			utils.convertDecimalToNativeInteger(takeProfitTrigger);
+    logger.info("Creating take profit order instruction:", {
+      market: assets.assetToName(marketIndex),
+      direction,
+      priceInfo: {
+        takeProfitPrice,
+        takeProfitTrigger,
+        nativeTakeProfit: nativeTakeProfit.toString(),
+        nativeTrigger: nativeTrigger.toString(),
+      },
+      sizeInfo: {
+        nativeLotSize: nativeLotSize.toString(),
+      },
+      orderDetails: {
+        side: tp_side === types.Side.BID ? "BID" : "ASK",
+        triggerDirection: direction === "long" ? "GREATER_THAN_OR_EQUAL" : "LESS_THAN_OR_EQUAL",
+        triggerOrderBit,
+      },
+    });
 
-		logger.info("Creating take profit order instruction:", {
-			market: assets.assetToName(marketIndex),
-			direction,
-			priceInfo: {
-				takeProfitPrice,
-				takeProfitTrigger,
-				nativeTakeProfit: nativeTakeProfit.toString(),
-				nativeTrigger: nativeTrigger.toString(),
-			},
-			sizeInfo: {
-				nativeLotSize: nativeLotSize.toString(),
-			},
-			orderDetails: {
-				side: tp_side === types.Side.BID ? "BID" : "ASK",
-				triggerDirection:
-					direction === "long" ? "GREATER_THAN_OR_EQUAL" : "LESS_THAN_OR_EQUAL",
-				triggerOrderBit,
-			},
-		});
+    return client.createPlaceTriggerOrderIx(
+      marketIndex,
+      nativeTakeProfit,
+      nativeLotSize,
+      tp_side,
+      nativeTrigger,
+      triggerDirection,
+      new BN(0),
+      types.OrderType.FILLORKILL,
+      triggerOrderBit,
+      {
+        reduceOnly: true,
+        tag: constants.DEFAULT_ORDER_TAG,
+      }
+    );
+  }
 
-		return this.client.createPlaceTriggerOrderIx(
-			marketIndex,
-			nativeTakeProfit,
-			nativeLotSize,
-			tp_side,
-			nativeTrigger,
-			triggerDirection,
-			new BN(0),
-			types.OrderType.FILLORKILL,
-			triggerOrderBit,
-			{
-				reduceOnly: true,
-				tag: constants.DEFAULT_ORDER_TAG,
-			}
-		);
-	}
+  createSLOrderInstruction(direction, marketIndex, stopLossPrice, stopLossTrigger, nativeLotSize, triggerOrderBit = 1) {
+    const client = direction === "long" ? this.longClient : this.shortClient;
+    const sl_side = direction === "long" ? types.Side.ASK : types.Side.BID;
+    const triggerDirection =
+      direction === "long"
+        ? types.TriggerDirection.LESSTHANOREQUAL
+        : types.TriggerDirection.GREATERTHANOREQUAL;
 
-	createSLOrderInstruction(
-		direction,
-		marketIndex,
-		stopLossPrice,
-		stopLossTrigger,
-		nativeLotSize,
-		triggerOrderBit = 1
-	) {
-		// These prices come in as decimal values, ready for native conversion
-		const sl_side = direction === "long" ? types.Side.ASK : types.Side.BID;
-		const triggerDirection =
-			direction === "long"
-				? types.TriggerDirection.LESSTHANOREQUAL
-				: types.TriggerDirection.GREATERTHANOREQUAL;
+    const nativeStopLoss = utils.convertDecimalToNativeInteger(stopLossPrice);
+    const nativeTrigger = utils.convertDecimalToNativeInteger(stopLossTrigger);
 
-		const nativeStopLoss = utils.convertDecimalToNativeInteger(stopLossPrice);
-		const nativeTrigger = utils.convertDecimalToNativeInteger(stopLossTrigger);
+    logger.info("Creating stop loss order instruction:", {
+      market: assets.assetToName(marketIndex),
+      direction,
+      priceInfo: {
+        stopLossPrice,
+        stopLossTrigger,
+        nativeStopLoss: nativeStopLoss.toString(),
+        nativeTrigger: nativeTrigger.toString(),
+      },
+      sizeInfo: {
+        nativeLotSize: nativeLotSize.toString(),
+      },
+      orderDetails: {
+        side: sl_side === types.Side.BID ? "BID" : "ASK",
+        triggerDirection: direction === "long" ? "LESS_THAN_OR_EQUAL" : "GREATER_THAN_OR_EQUAL",
+        triggerOrderBit,
+      },
+    });
 
-		logger.info("Creating stop loss order instruction:", {
-			market: assets.assetToName(marketIndex),
-			direction,
-			priceInfo: {
-				stopLossPrice,
-				stopLossTrigger,
-				nativeStopLoss: nativeStopLoss.toString(),
-				nativeTrigger: nativeTrigger.toString(),
-			},
-			sizeInfo: {
-				nativeLotSize: nativeLotSize.toString(),
-			},
-			orderDetails: {
-				side: sl_side === types.Side.BID ? "BID" : "ASK",
-				triggerDirection:
-					direction === "long" ? "LESS_THAN_OR_EQUAL" : "GREATER_THAN_OR_EQUAL",
-				triggerOrderBit,
-			},
-		});
+    return client.createPlaceTriggerOrderIx(
+      marketIndex,
+      nativeStopLoss,
+      nativeLotSize,
+      sl_side,
+      nativeTrigger,
+      triggerDirection,
+      new BN(0),
+      types.OrderType.FILLORKILL,
+      triggerOrderBit,
+      {
+        reduceOnly: true,
+        tag: constants.DEFAULT_ORDER_TAG,
+      }
+    );
+  }
 
-		return this.client.createPlaceTriggerOrderIx(
-			marketIndex,
-			nativeStopLoss,
-			nativeLotSize,
-			sl_side,
-			nativeTrigger,
-			triggerDirection,
-			new BN(0),
-			types.OrderType.FILLORKILL,
-			triggerOrderBit,
-			{
-				reduceOnly: true,
-				tag: constants.DEFAULT_ORDER_TAG,
-			}
-		);
-	}
 
-	calculateTrailingStopLoss(currentPrice, customPercentage = null) {
-		const { position, orders, entryPrice } = this.positionState;
-		if (!position || !orders?.takeProfit || !entryPrice) {
-			throw new Error(
-				"Invalid position state for trailing stop loss calculation"
-			);
-		}
-
-		const isShort = position.size < 0;
-		const entryPriceDecimal = this.roundToTickSize(entryPrice / 1e6);
-		const tpPriceDecimal = this.roundToTickSize(
-			orders.takeProfit.orderPrice / 1e6
-		);
-
-		if (customPercentage !== null) {
-			const stopLossPrice = this.roundToTickSize(
-				isShort
-					? entryPriceDecimal * (1 + Math.abs(customPercentage))
-					: entryPriceDecimal * (1 - Math.abs(customPercentage))
-			);
-
-			const priceDistance = Math.abs(stopLossPrice - entryPriceDecimal);
-			const triggerPrice = this.roundToTickSize(
-				isShort
-					? entryPriceDecimal + priceDistance * 0.9
-					: entryPriceDecimal - priceDistance * 0.9
-			);
-
-			console.log("Price movement analysis:", {
-				direction: isShort ? "SHORT" : "LONG",
-				entryPrice: entryPriceDecimal.toFixed(4),
-				customPercentage: (customPercentage * 100).toFixed(2) + "%",
-				calculatedStopLoss: stopLossPrice.toFixed(4),
-				calculatedTrigger: triggerPrice.toFixed(4),
-			});
-
-			logger.info(`
-Direct Stop Loss Modification:
-Entry: $${entryPriceDecimal.toFixed(4)}
-New SL Price: $${stopLossPrice.toFixed(4)} (${(
-				Math.abs(customPercentage) * 100
-			).toFixed(1)}%)
-New Trigger: $${triggerPrice.toFixed(4)}
-`);
-
-			return {
-				orderPrice: utils.convertDecimalToNativeInteger(stopLossPrice),
-				triggerPrice: utils.convertDecimalToNativeInteger(triggerPrice),
-			};
-		}
-
-		const currentPriceDecimal = this.roundToTickSize(currentPrice);
-		const totalDistance = Math.abs(tpPriceDecimal - entryPriceDecimal);
-		const priceProgress = isShort
-			? entryPriceDecimal - currentPriceDecimal
-			: currentPriceDecimal - entryPriceDecimal;
-		const progressPercentage = priceProgress / totalDistance;
-
-		console.log("Price movement analysis:", {
-			direction: isShort ? "SHORT" : "LONG",
-			entryPrice: entryPriceDecimal.toFixed(4),
-			currentPrice: currentPriceDecimal.toFixed(4),
-			tpPrice: tpPriceDecimal.toFixed(4),
-			totalDistanceToTP: totalDistance.toFixed(4),
-			currentProgressToTP: priceProgress.toFixed(4),
-			progressPercentage: (progressPercentage * 100).toFixed(2) + "%",
-			settings: {
-				progressThreshold:
-					(this.trailingSettings.progressThreshold * 100).toFixed(2) + "%",
-				triggerPosition:
-					(this.trailingSettings.triggerPricePosition * 100).toFixed(2) + "%",
-				orderPosition:
-					(this.trailingSettings.orderPricePosition * 100).toFixed(2) + "%",
-			},
-		});
-
-		if (progressPercentage >= this.trailingSettings.progressThreshold) {
-			const orderPrice = this.roundToTickSize(
-				entryPriceDecimal +
-					(isShort ? -1 : 1) *
-						totalDistance *
-						this.trailingSettings.orderPricePosition
-			);
-
-			const triggerPrice = this.roundToTickSize(
-				entryPriceDecimal +
-					(isShort ? -1 : 1) *
-						totalDistance *
-						this.trailingSettings.triggerPricePosition
-			);
-
-			logger.info(`
-Trailing Stop Adjustment:
-Direction: ${isShort ? "SHORT" : "LONG"}
-Entry: $${entryPriceDecimal.toFixed(4)}
-Current: $${currentPriceDecimal.toFixed(4)}
-TP Target: $${tpPriceDecimal.toFixed(4)}
-Progress: ${(progressPercentage * 100).toFixed(2)}%
-New Trigger: $${triggerPrice.toFixed(4)}
-New Order: $${orderPrice.toFixed(4)}
-        `);
-
-			return {
-				orderPrice: utils.convertDecimalToNativeInteger(orderPrice),
-				triggerPrice: utils.convertDecimalToNativeInteger(triggerPrice),
-			};
-		}
-
-		return null;
-	}
-
-	async verifyStopLossAdjustment(newPrices, maxAttempts = 15) {
-		const POLL_INTERVAL = 3000;
-		const oldStopLossPrice = this.positionState.orders.stopLoss.orderPrice;
-
-		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-			await this.client.updateState();
-			const triggerOrders = this.client.getTriggerOrders(
-				this.positionState.marketIndex
-			);
-			const stopLoss = triggerOrders?.find(
-				(order) =>
-					order.triggerOrderBit ===
-					this.positionState.orders.stopLoss.triggerOrderBit
-			);
-
-			if (stopLoss?.orderPrice !== oldStopLossPrice) {
-				logger.info(`Stop loss adjusted after ${attempt} attempt(s)`);
-				return true;
-			}
-
-			if (attempt < maxAttempts) {
-				console.log(`Stop loss not adjusted, waiting ${POLL_INTERVAL}ms...`);
-				await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-			}
-		}
-
-		console.log(`Stop loss not adjusted after ${maxAttempts} attempts`);
-		return false;
-	}
+  
 
 	stopPositionMonitoring() {
 		if (this.monitoringInterval) {
