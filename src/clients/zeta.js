@@ -78,13 +78,9 @@ export class ZetaClientWrapper {
   }
 
 	roundToTickSize(nativePrice) {
-		// Convert from native integer to decimal first
-		const decimalPrice = nativePrice / 1e6;
-		// Round to the nearest tick (0.0001)
 		const tickSize = 0.0001;
 		const roundedDecimal = Math.round(decimalPrice / tickSize) * tickSize;
-		// Convert back to native integer
-		return Math.round(roundedDecimal * 1e6);
+		return roundedDecimal;
 	}
 
   async initialize(symbols) {
@@ -806,12 +802,11 @@ export class ZetaClientWrapper {
     await client.updateState();
 
     const openTriggerOrders = await this.getTriggerOrders(marketIndex, direction);
+
     if (openTriggerOrders && openTriggerOrders.length > 0) {
       logger.info(`Found Trigger Orders for ${direction}, Cancelling...`, openTriggerOrders);
 
-      for (const triggerOrder of openTriggerOrders) {
-        await client.cancelTriggerOrder(triggerOrder.triggerOrderBit);
-      }
+      await client.cancelAllTriggerOrders(marketIndex);
 
       logger.info(`${direction} Trigger Orders Cancelled.`);
     }
