@@ -368,7 +368,7 @@ export class ZetaClientWrapper {
         this.reconnect();
       }
 
-      logger.info("System Status:", {
+      console.log("System Status:", {
         wsConnected: this.connectionActive,
         queueLength: this.messageQueue.length,
         reconnectAttempts: this.reconnectAttempts,
