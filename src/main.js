@@ -34,7 +34,7 @@ const MONITORING_INTERVALS = {
  * @returns {string[]} Array of validated trading symbols
  * @throws {Error} If configuration is invalid
  */
-function validateConfig() {
+export function validateConfig() {
   // Essential environment variables that must be present
   const requiredEnvVars = ["KEYPAIR_FILE_PATH_LONG", "KEYPAIR_FILE_PATH_SHORT", "WS_API_KEY", "RPC_TRADINGBOT"];
 
@@ -64,7 +64,7 @@ function validateConfig() {
   return tradingSymbols;
 }
 
-async function initializeExchange(markets) {
+export async function initializeExchange(markets) {
   try {
     const connection = new Connection(process.env.RPC_TRADINGBOT);
 
@@ -77,10 +77,10 @@ async function initializeExchange(markets) {
       connection,
       {
         skipPreflight: true,
-        preflightCommitment: "finalized",
-        commitment: "finalized",
+        preflightCommitment: "confirmed",
+        commitment: "confirmed",
       },
-      500,
+      25,
       true,
       connection,
       marketsArray,
@@ -344,7 +344,7 @@ class MultiTradingManager {
  * Manages trading operations for a specific direction (long/short)
  * Coordinates multiple symbols while maintaining direction-specific logic
  */
-class DirectionalTradingManager {
+export class DirectionalTradingManager {
   constructor(direction, symbols) {
     this.direction = direction; // 'long' or 'short'
     this.symbols = symbols; // Array of trading symbols
@@ -445,6 +445,8 @@ class DirectionalTradingManager {
         }
       } catch (error) {
         logger.error(`[INIT] Error checking ${symbol} position:`, error);
+        
+        await this.zetaWrapper.cancelAllTriggerOrders(constants.Asset[symbol]);
       }
     }
   }
@@ -485,13 +487,14 @@ class SymbolTradingManager {
     try {
       const recentFees = await fetchSolanaPriorityFee(this.zetaWrapper.connection, 150, []);
       const newFee = recentFees?.slice(0, 10).reduce((sum, fee) => sum + fee.prioritizationFee, 0) / 10 || 1_000;
-      const currentPriorityFee = Math.floor(newFee * 5);
+      const multiplier = 10;
+      const currentPriorityFee = Math.floor(newFee * multiplier);
 
       Exchange.updatePriorityFee(currentPriorityFee);
       logger.info("Updated transaction priority fee:", {
         baseFee: newFee,
         adjustedFee: currentPriorityFee,
-        multiplier: 5,
+        multiplier: multiplier,
       });
 
       return currentPriorityFee;
@@ -895,9 +898,10 @@ async function setupPriorityFees(connection) {
       multiplier: priorityFeeMultiplier,
     });
 
-    Exchange.updatePriorityFee(currentPriorityFee);
     Exchange.setUseAutoPriorityFee(false);
 
+    Exchange.updatePriorityFee(currentPriorityFee);
+    
     return priorityFees;
   } catch (error) {
     logger.error("Error setting up priority fees:", error);

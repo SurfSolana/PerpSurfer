@@ -26,7 +26,7 @@ export class ZetaClientWrapper {
 		this.use_db_settings = true;
 
 		this.priorityFees = null;
-		this.priorityFeeMultiplier = 5;
+		this.priorityFeeMultiplier = 10;
 		this.currentPriorityFee = 5_000;
 
 		this.monitoringInterval = null;
@@ -43,18 +43,6 @@ export class ZetaClientWrapper {
 			entryPrice: null,
 			hasAdjustedStopLoss: false,
 		};
-
-		// this.trailingSettings = {
-		//   progressThreshold: 0.6,
-		//   triggerPricePosition: 0.55,
-		//   orderPricePosition: 0.5,
-		// };
-
-		// this.trailingSettings = {
-		//   progressThreshold: 0.36,
-		//   triggerPricePosition: 0.1,
-		//   orderPricePosition: 0.05,
-		// };
 	}
 
 	roundToTickSize(price) {
@@ -339,10 +327,6 @@ export class ZetaClientWrapper {
 			logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
 			const txid = await this.openPositionWithTPSLVersioned(direction, marketIndex, makerOrTaker);
 
-			if (!txid) {
-				throw new Error("No transaction ID returned");
-			}
-
 			logger.info(`Position opened successfully`, {
 				direction,
 				asset: assets.assetToName(marketIndex),
@@ -369,30 +353,26 @@ export class ZetaClientWrapper {
 		}
 	}
 
+  async cancelAllTriggerOrders(marketIndex) {
+
+    const openTriggerOrders = await this.getTriggerOrders(marketIndex);
+
+    if (openTriggerOrders && openTriggerOrders.length > 0) {
+      logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
+      await this.client.cancelAllTriggerOrders(marketIndex);
+      logger.info("Trigger Orders Cancelled.", triggerOrderTxs);
+    } else {
+      logger.info(`No Trigger Orders found.`);
+    }
+
+  }
+
 	async openPositionWithTPSLVersioned(direction, marketIndex = this.activeMarket, makerOrTaker = "maker") {
 		try {
 			logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
 
-			const openTriggerOrders = await this.getTriggerOrders(marketIndex);
-			// Keep track of cancelled bits to avoid reuse
-			const cancelledBits = [];
-
-			if (openTriggerOrders && openTriggerOrders.length > 0) {
-				logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
-
-				// await this.updatePriorityFees();
-				const triggerOrderTxs = [];
-
-				for (const triggerOrder of openTriggerOrders) {
-					await this.client.updateState(true, true);
-					const tx = await this.client.cancelTriggerOrder(triggerOrder.triggerOrderBit);
-					cancelledBits.push(triggerOrder.triggerOrderBit);
-					triggerOrderTxs.push(tx);
-				}
-
-				logger.info("Trigger Orders Cancelled.", triggerOrderTxs);
-			}
-
+      await this.cancelAllTriggerOrders(marketIndex);
+      
 			const settings = this.fetchSettings();
 			logger.info(`Using settings:`, settings);
 
@@ -474,8 +454,8 @@ Opening ${direction} position:
 				undefined,
 				{
 					skipPreflight: true,
-					preflightCommitment: "finalized",
-					commitment: "finalized",
+					preflightCommitment: "confirmed",
+					commitment: "confirmed",
 				},
 				false,
 				utils.getZetaLutArr()
@@ -515,9 +495,9 @@ Opening ${direction} position:
 	}
 
 	calculateTPSLPrices(direction, price, settings) {
-		if (!direction || !price || !settings) {
-			throw new Error("Invalid inputs for TP/SL calculation");
-		}
+		// if (!direction || !price || !settings) {
+		// 	throw new Error("Invalid inputs for TP/SL calculation");
+		// }
 
 		const { takeProfitPercentage, stopLossPercentage } = settings;
 		const isLong = direction === "long";
@@ -560,9 +540,9 @@ Opening ${direction} position:
 	}
 
 	calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "maker") {
-		if (side === undefined || side === null || !marketIndex || !balance || !settings) {
-			throw new Error("Invalid inputs for price and size calculation");
-		}
+		// if (side === undefined || side === null || !marketIndex || !balance || !settings) {
+		// 	throw new Error("Invalid inputs for price and size calculation");
+		// }
 
 		Exchange.getPerpMarket(marketIndex).forceFetchOrderbook();
 		const orderbook = Exchange.getOrderbook(marketIndex);
