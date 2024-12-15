@@ -714,11 +714,12 @@ class SymbolTradingManager {
             const updatedOrders = await this.zetaWrapper.getTriggerOrders(this.marketIndex);
             const updatedStopLoss = updatedOrders.find(order => order.triggerOrderBit === stopLoss.triggerOrderBit);
 
-            if (updatedStopLoss && updatedStopLoss.orderPrice !== stopLoss.orderPrice) {
+            if (updatedStopLoss) {
               logger.info(`[${this.symbol}] Stop loss successfully adjusted`);
               this.stopMonitoring(positionId);
               return;
             }
+            
           }
         } catch (error) {
           logger.error(`[${this.symbol}] Error during stop loss adjustment:`, error);
@@ -778,38 +779,38 @@ class SymbolTradingManager {
     return progressPercent >= requiredProgress;
   }
 
-  async hasOriginalStopLoss(position) {
-    const triggerOrders = await this.zetaWrapper.getTriggerOrders(this.marketIndex);
-    const isShort = position.size < 0;
+  // async hasOriginalStopLoss(position) {
+  //   const triggerOrders = await this.zetaWrapper.getTriggerOrders(this.marketIndex);
+  //   const isShort = position.size < 0;
 
-    const stopLoss = triggerOrders.find((order) => (isShort ? 
-      order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL : 
-      order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL));
+  //   const stopLoss = triggerOrders.find((order) => (isShort ? 
+  //     order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL : 
+  //     order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL));
 
-    if (!stopLoss) return false;
+  //   if (!stopLoss) return false;
 
-    const currentStopLossPrice = stopLoss.orderPrice / 1e6;
-    const entryPrice = Math.abs(position.costOfTrades / position.size);
+  //   const currentStopLossPrice = stopLoss.orderPrice / 1e6;
+  //   const entryPrice = Math.abs(position.costOfTrades / position.size);
 
-    const { stopLossPrice: originalStopLoss } = this.zetaWrapper.calculateTPSLPrices(
-      isShort ? "short" : "long", 
-      entryPrice, 
-      await this.zetaWrapper.fetchSettings()
-    );
+  //   const { stopLossPrice: originalStopLoss } = this.zetaWrapper.calculateTPSLPrices(
+  //     isShort ? "short" : "long", 
+  //     entryPrice, 
+  //     await this.zetaWrapper.fetchSettings()
+  //   );
 
-    const difference = Math.abs(currentStopLossPrice - originalStopLoss) / originalStopLoss;
+  //   const difference = Math.abs(currentStopLossPrice - originalStopLoss) / originalStopLoss;
 
-    console.log(`[${this.symbol}] Stop Loss Analysis:`, {
-      direction: isShort ? "SHORT" : "LONG",
-      entryPrice: entryPrice.toFixed(4),
-      originalStopLoss: originalStopLoss.toFixed(4),
-      currentStopLoss: currentStopLossPrice.toFixed(4),
-      difference: (difference * 100).toFixed(2) + "%",
-      isOriginal: difference < 0.001,
-    });
+  //   console.log(`[${this.symbol}] Stop Loss Analysis:`, {
+  //     direction: isShort ? "SHORT" : "LONG",
+  //     entryPrice: entryPrice.toFixed(4),
+  //     originalStopLoss: originalStopLoss.toFixed(4),
+  //     currentStopLoss: currentStopLossPrice.toFixed(4),
+  //     difference: (difference * 100).toFixed(2) + "%",
+  //     isOriginal: difference < 0.005,
+  //   });
 
-    return difference < 0.001;
-  }
+  //   return difference < 0.005;
+  // }
 
   
   async hasOriginalStopLoss(position) {
@@ -826,7 +827,7 @@ class SymbolTradingManager {
     const { stopLossPrice: originalStopLoss } = this.zetaWrapper.calculateTPSLPrices(isShort ? "short" : "long", entryPrice, await this.zetaWrapper.fetchSettings());
 
     const difference = Math.abs(currentStopLossPrice - originalStopLoss) / originalStopLoss;
-    return difference < 0.001; // Return true if at original stop loss
+    return difference < 0.005; // Return true if at original stop loss
   }
 
   generatePositionId(position) {

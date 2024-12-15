@@ -200,86 +200,9 @@ export class ZetaClientWrapper {
 	}
 
 	async adjustStopLossOrder(newPrices, asset, positionSize) {
-		try {
-			// Get current trigger orders
-			const triggerOrders = await this.getTriggerOrders(asset);
-			const isShort = positionSize < 0;
-
-			// Find the stop loss order
-			const stopLoss = triggerOrders.find((order) =>
-				isShort
-					? order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
-					: order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
-			);
-
-			if (!stopLoss) {
-				throw new Error("Stop loss order not found");
-			}
-
-			if (
-				!newPrices?.orderPrice ||
-				!newPrices?.triggerPrice ||
-				typeof newPrices.orderPrice !== "number" ||
-				typeof newPrices.triggerPrice !== "number"
-			) {
-				throw new Error("Invalid price inputs for stop loss adjustment");
-			}
-
-			// Round the prices to tick size before converting to native integer
-			const orderPriceDecimal = this.roundToTickSize(newPrices.orderPrice / 1e6);
-			const triggerPriceDecimal = this.roundToTickSize(newPrices.triggerPrice / 1e6);
-
-			const orderPriceNative = utils.convertDecimalToNativeInteger(orderPriceDecimal);
-			const triggerPriceNative = utils.convertDecimalToNativeInteger(triggerPriceDecimal);
-
-			logger.info("Editing trigger order with parameters:", {
-				triggerOrderBit: stopLoss.triggerOrderBit,
-				orderPrice: {
-					value: orderPriceNative,
-					decimal: orderPriceDecimal,
-				},
-				triggerPrice: {
-					value: triggerPriceNative,
-					decimal: triggerPriceDecimal,
-				},
-				size: stopLoss.size,
-				side: stopLoss.side,
-				triggerDirection: stopLoss.triggerDirection,
-				orderType: stopLoss.orderType,
-			});
-
-			await this.client.updateState();
-
-			const tx = await this.client.editPriceTriggerOrder(
-				stopLoss.triggerOrderBit,
-				orderPriceNative,
-				triggerPriceNative,
-				stopLoss.size,
-				stopLoss.side,
-				stopLoss.triggerDirection,
-				stopLoss.orderType,
-				{
-					reduceOnly: true,
-					tag: constants.DEFAULT_ORDER_TAG,
-				}
-			);
-
-			logger.info("Stop loss adjustment transaction:", {
-				success: true,
-				txid: tx,
-				orderDetails: {
-					newOrderPrice: orderPriceDecimal,
-					newTriggerPrice: triggerPriceDecimal,
-					size: stopLoss.size,
-				},
-			});
-
-			return true;
-		} catch (error) {
-			logger.error("Failed to adjust stop loss:", error);
-			throw error;
-		}
-	}
+    console.log("Reached threshold, do nothing for now.");
+    return true;
+  }
 
 	async checkPositionProgress() {
 		try {
@@ -322,78 +245,43 @@ export class ZetaClientWrapper {
 		}
 	}
 
-	async openPosition(direction, marketIndex = constants.Asset.SOL, makerOrTaker = "maker") {
-		try {
-			logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
-			const txid = await this.openPositionWithTPSLVersioned(direction, marketIndex, makerOrTaker);
 
-			logger.info(`Position opened successfully`, {
-				direction,
-				asset: assets.assetToName(marketIndex),
-				txid,
-			});
+	async cancelAllTriggerOrders(marketIndex) {
+		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
 
-			return txid;
-		} catch (error) {
-			// Categorize and enhance the error
-			const errorContext = {
-				direction,
-				asset: assets.assetToName(marketIndex),
-				type: error.name,
-				details: error.message,
-				code: error.code, // If provided by SDK
-				timestamp: new Date().toISOString(),
-			};
-
-			// Log a single, comprehensive error message
-			logger.error(`Failed to open ${direction} position for ${assets.assetToName(marketIndex)}`, errorContext);
-
-			// Rethrow a cleaner error for upper layers
-			throw new Error(`Position opening failed: ${error.message}`);
+		if (openTriggerOrders && openTriggerOrders.length > 0) {
+			logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
+			await this.client.cancelAllTriggerOrders(marketIndex);
+			logger.info("Trigger Orders Cancelled.", triggerOrderTxs);
+		} else {
+			logger.info(`No Trigger Orders found.`);
 		}
 	}
 
-  async cancelAllTriggerOrders(marketIndex) {
+	async openPosition(direction, marketIndex = this.activeMarket, makerOrTaker = "maker") {
+		logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
 
-    const openTriggerOrders = await this.getTriggerOrders(marketIndex);
+		const settings = this.fetchSettings();
+		logger.info(`Using settings:`, settings);
 
-    if (openTriggerOrders && openTriggerOrders.length > 0) {
-      logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
-      await this.client.cancelAllTriggerOrders(marketIndex);
-      logger.info("Trigger Orders Cancelled.", triggerOrderTxs);
-    } else {
-      logger.info(`No Trigger Orders found.`);
-    }
+		const balance = Exchange.riskCalculator.getCrossMarginAccountState(this.client.account).balance;
+		const side = direction === "long" ? types.Side.BID : types.Side.ASK;
 
-  }
+		const { currentPrice, adjustedPrice, positionSize, nativeLotSize } = this.calculatePricesAndSize(
+			side,
+			marketIndex,
+			balance,
+			settings,
+			"taker"
+		);
 
-	async openPositionWithTPSLVersioned(direction, marketIndex = this.activeMarket, makerOrTaker = "maker") {
-		try {
-			logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
+		const { takeProfitPrice, takeProfitTrigger, stopLossPrice, stopLossTrigger } = this.calculateTPSLPrices(
+			direction,
+			adjustedPrice,
+			settings
+		);
 
-      await this.cancelAllTriggerOrders(marketIndex);
-      
-			const settings = this.fetchSettings();
-			logger.info(`Using settings:`, settings);
-
-			const balance = Exchange.riskCalculator.getCrossMarginAccountState(this.client.account).balance;
-			const side = direction === "long" ? types.Side.BID : types.Side.ASK;
-
-			const { currentPrice, adjustedPrice, positionSize, nativeLotSize } = this.calculatePricesAndSize(
-				side,
-				marketIndex,
-				balance,
-				settings,
-				"taker"
-			);
-
-			const { takeProfitPrice, takeProfitTrigger, stopLossPrice, stopLossTrigger } = this.calculateTPSLPrices(
-				direction,
-				adjustedPrice,
-				settings
-			);
-
-			logger.info(`
+		logger.info(`
 Opening ${direction} position:
 ------------------------------
     Take Profit ⟶ $${takeProfitPrice.toFixed(4)}
@@ -407,41 +295,42 @@ Opening ${direction} position:
       SL Price ⟶ $${stopLossPrice.toFixed(4)}
 ------------------------------`);
 
-			// await this.updatePriorityFees();
+		// await this.updatePriorityFees();
 
-			await this.client.updateState(true, true);
+		await this.client.updateState(true, true);
 
-			let transaction = new Transaction().add(
-				ComputeBudgetProgram.setComputeUnitLimit({
-					units: 350_000,
-				})
-			);
+		let transaction = new Transaction().add(
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 350_000,
+			})
+		);
 
-			const triggerBit_TP = this.client.findAvailableTriggerOrderBit();
-			const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1);
+		const triggerBit_TP = this.client.findAvailableTriggerOrderBit();
+		const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1);
 
-			const mainOrderIx = this.createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, "taker");
-			const tpOrderIx = this.createTPOrderInstruction(
-				direction,
-				marketIndex,
-				takeProfitPrice,
-				takeProfitTrigger,
-				nativeLotSize,
-				triggerBit_TP
-			);
-			const slOrderIx = this.createSLOrderInstruction(
-				direction,
-				marketIndex,
-				stopLossPrice,
-				stopLossTrigger,
-				nativeLotSize,
-				triggerBit_SL
-			);
+		const mainOrderIx = this.createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, "taker");
+		const tpOrderIx = this.createTPOrderInstruction(
+			direction,
+			marketIndex,
+			takeProfitPrice,
+			takeProfitTrigger,
+			nativeLotSize,
+			triggerBit_TP
+		);
+		const slOrderIx = this.createSLOrderInstruction(
+			direction,
+			marketIndex,
+			stopLossPrice,
+			stopLossTrigger,
+			nativeLotSize,
+			triggerBit_SL
+		);
 
-			transaction.add(mainOrderIx);
-			transaction.add(tpOrderIx);
-			transaction.add(slOrderIx);
+		transaction.add(mainOrderIx);
+		transaction.add(tpOrderIx);
+		transaction.add(slOrderIx);
 
+		try {
 			const txid = await utils.processTransaction(
 				this.client.provider,
 				transaction,
@@ -458,8 +347,18 @@ Opening ${direction} position:
 			logger.info(`Transaction sent successfully. txid: ${txid}`);
 			return txid;
 		} catch (error) {
-			logger.error("Error opening position with TP/SL:", error);
-			throw error;
+			// Categorize and enhance the error
+			const errorContext = {
+				direction,
+				asset: assets.assetToName(marketIndex),
+				type: error.name,
+				details: error.message,
+				code: error.code, // If provided by SDK
+				timestamp: new Date().toISOString(),
+			};
+
+			// Log a single, comprehensive error message
+			logger.error(`Failed to open ${direction} position for ${assets.assetToName(marketIndex)}`, errorContext);
 		}
 	}
 
@@ -483,8 +382,6 @@ Opening ${direction} position:
 				stopLossDistance: 0.5,
 			},
 		};
-
-		// logger.info("Parsed settings:", settings); // Debug log
 		return settings;
 	}
 
