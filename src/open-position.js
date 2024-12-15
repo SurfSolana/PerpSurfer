@@ -1,185 +1,139 @@
-import { ZetaClientWrapper } from "./clients/zeta.js";
-import { Exchange, Network, types, constants, utils } from "@zetamarkets/sdk";
-import {
-	BN,
-	PriorityFeeMethod,
-	PriorityFeeSubscriber,
-	fetchSolanaPriorityFee,
-} from "@drift-labs/sdk";
-import dotenv from "dotenv";
-import fs from "fs";
-import yargs from "yargs";
-import { hideBin } from "yargs/helpers";
+// NEEDS REFACTOR
 
-dotenv.config();
+// #!/usr/bin/env node
 
-// Command line argument setup with improved descriptions
-const argv = yargs(hideBin(process.argv))
-	.usage("Usage: $0 [options]")
-	.example(
-		"$0 -d long -s SOL",
-		"Open a long SOL position with default settings"
-	)
-	.example(
-		"$0 -d short -s ETH -l 3 --tp 0.04",
-		"Open a 3x leveraged short ETH position with 4% take profit"
-	)
-	.option("direction", {
-		alias: "d",
-		description: "Position direction (long = buy, short = sell)",
-		choices: ["long", "short"],
-		required: true,
-		group: "Required:",
-	})
-	.option("symbol", {
-		alias: "s",
-		description: "Trading asset symbol (e.g., SOL, ETH, BTC)",
-		choices: Object.keys(constants.Asset).filter((key) => isNaN(Number(key))),
-		required: true,
-		group: "Required:",
-	})
-	.option("leverage", {
-		alias: "l",
-		description: "Position leverage multiplier (e.g., 4 means 4x leverage)",
-		type: "number",
-		default: 4,
-		group: "Position Settings:",
-	})
-	.option("takeProfit", {
-		alias: "tp",
-		description: "Take profit percentage (0.036 = 3.6% profit target)",
-		type: "number",
-		default: 0.036,
-		group: "Position Settings:",
-	})
-	.option("stopLoss", {
-		alias: "sl",
-		description: "Stop loss percentage (0.018 = 1.8% loss limit)",
-		type: "number",
-		default: 0.018,
-		group: "Position Settings:",
-	})
-	.option("orderType", {
-		alias: "o",
-		description: "Order type (maker = limit order, taker = market order)",
-		choices: ["maker", "taker"],
-		default: "taker",
-		group: "Position Settings:",
-	})
-	.wrap(100)
-	.epilogue(
-		"For more information about the trading parameters, check the documentation"
-	)
-	.help()
-	.alias("help", "h").argv;
+// import yargs from "yargs";
+// import { hideBin } from "yargs/helpers";
+// import dotenv from "dotenv";
+// import { ZetaClientWrapper } from "./clients/zeta.js";
+// import { constants } from "@zetamarkets/sdk";
+// import logger from "./utils/logger.js";
 
-/**
- * Validates essential environment variables and files
- * @throws {Error} If required configuration is missing
- */
-function validateConfig() {
-	const requiredEnvVars = [
-		"KEYPAIR_FILE_PATH_LONG",
-		"KEYPAIR_FILE_PATH_SHORT",
-		"RPC_TRADINGBOT",
-	];
+// dotenv.config();
 
-	const missingVars = requiredEnvVars.filter((envVar) => !process.env[envVar]);
-	if (missingVars.length > 0) {
-		console.error(
-			`Missing required environment variables: ${missingVars.join(", ")}`
-		);
-		process.exit(1);
-	}
+// const validateInputs = (argv) => {
+// 	// Validate direction
+// 	if (!["long", "short"].includes(argv.direction)) {
+// 		throw new Error('Direction must be either "long" or "short"');
+// 	}
 
-	// Verify wallet files exist
-	const walletPath =
-		argv.direction === "long"
-			? process.env.KEYPAIR_FILE_PATH_LONG
-			: process.env.KEYPAIR_FILE_PATH_SHORT;
+// 	// Validate token
+// 	if (!constants.Asset[argv.token]) {
+// 		throw new Error(`Invalid token. Must be one of: ${Object.keys(constants.Asset).join(", ")}`);
+// 	}
 
-	if (!fs.existsSync(walletPath)) {
-		console.error(`Wallet file not found at ${walletPath}`);
-		process.exit(1);
-	}
-}
+// 	// Validate numeric inputs
+// 	const leverage = parseFloat(argv.leverage);
+// 	const takeProfit = parseFloat(argv.takeprofit);
+// 	const stopLoss = parseFloat(argv.stoploss);
 
-/**
- * Opens a position with specified parameters
- */
-async function openPosition() {
-	try {
-		// Validate configuration first
-		validateConfig();
+// 	if (isNaN(leverage) || leverage <= 0 || leverage > 10) {
+// 		throw new Error("Leverage must be a number between 0 and 10");
+// 	}
 
-		// Convert symbol to market index
-		const marketIndex = constants.Asset[argv.symbol];
+// 	if (isNaN(takeProfit) || takeProfit <= 0 || takeProfit > 100) {
+// 		throw new Error("Take profit must be a percentage between 0 and 100");
+// 	}
 
-		// Initialize ZetaWrapper
-		const zetaWrapper = new ZetaClientWrapper();
+// 	if (isNaN(stopLoss) || stopLoss <= 0 || stopLoss > 100) {
+// 		throw new Error("Stop loss must be a percentage between 0 and 100");
+// 	}
 
-		// Initialize exchange and get connection
-		await zetaWrapper.initializeExchange(marketIndex);
+// 	return {
+// 		direction: argv.direction,
+// 		token: argv.token,
+// 		leverage: leverage,
+// 		takeProfit: takeProfit / 100, // Convert percentage to decimal
+// 		stopLoss: stopLoss / 100, // Convert percentage to decimal
+// 	};
+// };
 
-		// Set custom trading settings
-		zetaWrapper.settings = {
-			leverageMultiplier: argv.leverage,
-			takeProfitPercentage: argv.takeProfit,
-			stopLossPercentage: argv.stopLoss,
-			trailingStopLoss: {
-				progressThreshold: 0.6,
-				stopLossDistance: 0.4,
-				triggerDistance: 0.45,
-			},
-		};
+// const openPosition = async (validatedArgs) => {
+// 	const zetaClient = new ZetaClientWrapper();
 
-		// Initialize client with appropriate wallet
-		const walletPath =
-			argv.direction === "long"
-				? process.env.KEYPAIR_FILE_PATH_LONG
-				: process.env.KEYPAIR_FILE_PATH_SHORT;
+// 	// Override default settings with CLI arguments
+// 	zetaClient.settings = {
+// 		leverageMultiplier: validatedArgs.leverage,
+// 		takeProfitPercentage: validatedArgs.takeProfit,
+// 		stopLossPercentage: validatedArgs.stopLoss,
+// 		trailingStopLoss: {
+// 			progressThreshold: 0.6,
+// 			stopLossDistance: 0.4,
+// 			triggerDistance: 0.45,
+// 		},
+// 	};
 
-		await zetaWrapper.initializeClient(walletPath);
+// 	// Initialize the base client with symbols
+// 	await zetaClient.initialize([validatedArgs.token]);
+  
+// 	// Initialize for specific direction
+// 	await zetaClient.initializeDirection(validatedArgs.direction);
 
-		console.log("Opening position with parameters:", {
-			direction: argv.direction,
-			symbol: argv.symbol,
-			leverage: argv.leverage + "x",
-			takeProfit: (argv.takeProfit * 100).toFixed(2) + "%",
-			stopLoss: (argv.stopLoss * 100).toFixed(2) + "%",
-			orderType: argv.orderType,
-		});
+// 	// Open the position
+// 	const marketIndex = constants.Asset[validatedArgs.token];
+// 	const txid = await zetaClient.openPosition(validatedArgs.direction, marketIndex, "taker");
 
-		// Open the position
-		const txid = await zetaWrapper.openPosition(
-			argv.direction,
-			marketIndex,
-			argv.orderType
-		);
+// 	logger.info("Position opened successfully", {
+// 		txid,
+// 		...validatedArgs,
+// 	});
 
-		console.log("Position opened successfully!");
-		console.log("Transaction ID:", txid);
+// 	// Allow time for position monitoring to start
+// 	await new Promise((resolve) => setTimeout(resolve, 2000));
 
-		process.exit(0);
-	} catch (error) {
-		console.error("Error opening position:", error);
-		process.exit(1);
-	}
-}
+// 	// Cleanup
+// 	if (Exchange.isInitialized) {
+// 		await Exchange.close();
+// 	}
+// 	process.exit(0);
+// };
 
-// Handle interruptions gracefully
-process.on("SIGINT", async () => {
-	console.log("\nGracefully shutting down...");
-	process.exit(0);
-});
+// async function main() {
+// 	try {
+// 		const argv = await yargs(hideBin(process.argv))
+// 			.command("$0", "Open a position with specified parameters", (yargs) => {
+// 				return yargs
+// 					.option("direction", {
+// 						alias: "d",
+// 						describe: "Trading direction (long/short)",
+// 						type: "string",
+// 						required: true,
+// 					})
+// 					.option("token", {
+// 						alias: "t",
+// 						describe: "Token to trade",
+// 						type: "string",
+// 						required: true,
+// 					})
+// 					.option("leverage", {
+// 						alias: "l",
+// 						describe: "Leverage multiplier",
+// 						type: "number",
+// 						required: true,
+// 					})
+// 					.option("takeprofit", {
+// 						alias: "tp",
+// 						describe: "Take profit percentage",
+// 						type: "number",
+// 						required: true,
+// 					})
+// 					.option("stoploss", {
+// 						alias: "sl",
+// 						describe: "Stop loss percentage",
+// 						type: "number",
+// 						required: true,
+// 					});
+// 			})
+// 			.help()
+// 			.strict()
+// 			.parse();
 
-process.on("unhandledRejection", async (reason, promise) => {
-	console.error("Unhandled Promise Rejection:", reason);
-	process.exit(1);
-});
+// 		const validatedArgs = validateInputs(argv);
+// 		await openPosition(validatedArgs);
+// 	} catch (error) {
+// 		logger.error(error.message);
+// 		process.exit(1);
+// 	}
+// }
 
-// Start the position opening process
-openPosition().catch(async (error) => {
-	console.error("Fatal error:", error);
-	process.exit(1);
-});
+// main();
