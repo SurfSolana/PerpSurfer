@@ -1,6 +1,6 @@
 import winston from "winston";
 import TelegramBot from "node-telegram-bot-api";
-import { TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID } from "../config/config.js";
+import { TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID, SERVER_NAME } from "../config/config.js";
 
 const { combine, timestamp, printf, colorize, errors } = winston.format;
 
@@ -12,10 +12,9 @@ if (isTelegramConfigured) {
     bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
 }
 
-
 const logFormat = printf(
 	({ level, message, timestamp, stack, ...metadata }) => {
-		let msg = `${timestamp} [${level}] : ${message}`;
+		let msg = `${timestamp} [${SERVER_NAME}] [${level}] : ${message}`;
 		if (stack) {
 			msg += `\n${stack}`;
 		}
@@ -119,7 +118,6 @@ function splitLongMessage(message, maxLength = 4000) {
   return parts.map(part => `<pre>${escapeHtml(part)}</pre>`);
 }
 
-
 // Debounce time in milliseconds (1000 ms) TG max 1 per second
 const DEBOUNCE_TIME = 1000;
 
@@ -141,7 +139,7 @@ async function sendAccumulatedMessages(level) {
   const emoji = getEmojiForLogLevel(level);
   const messages = accumulatedMessages[level].join("\n");
   const messageParts = splitLongMessage(
-      `${emoji} ${level.toUpperCase()}:\n${messages}`
+      `${emoji} [${SERVER_NAME}] ${level.toUpperCase()}:\n${messages}`
   );
 
   for (const part of messageParts) {
@@ -158,7 +156,6 @@ async function sendAccumulatedMessages(level) {
 
   accumulatedMessages[level] = [];
 }
-
 
 function formatMetadata(metadata) {
 	if (Object.keys(metadata).length > 0) {

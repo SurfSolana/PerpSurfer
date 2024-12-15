@@ -13,3 +13,5 @@ export const ASSETS = Object.values(constants.Asset).filter(
 export const SYMBOLS = ASSETS.map((asset) => constants.Asset[asset]);
 
 export const ACTIVE_SYMBOLS = ["SOL", "ETH", "BTC"];
+
+export const SERVER_NAME="SURF";
