@@ -420,12 +420,6 @@ Opening ${direction} position:
 			const triggerBit_TP = this.client.findAvailableTriggerOrderBit();
 			const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1);
 
-			// Forcefully increment bits if they collide with cancelled ones or exceed 127
-			while (cancelledBits.includes(triggerBit_TP) || cancelledBits.includes(triggerBit_SL) || triggerBit_SL > 127) {
-				triggerBit_TP = (triggerBit_TP + 1) % 128;
-				triggerBit_SL = (triggerBit_TP + 1) % 128;
-			}
-
 			const mainOrderIx = this.createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, "taker");
 			const tpOrderIx = this.createTPOrderInstruction(
 				direction,
