@@ -29,10 +29,10 @@ async function validateAndInitialize() {
         connection,
         {
             skipPreflight: true,
-            preflightCommitment: "confirmed",
-            commitment: "confirmed",
+            preflightCommitment: "finalized",
+            commitment: "finalized",
         },
-        25,
+        50,
         true,
         connection
     );
@@ -85,15 +85,19 @@ async function openTestPosition(asset, direction) {
         const zetaWrapper = new ZetaClientWrapper();
         await zetaWrapper.initialize([constants.Asset[asset]], keypairPath);
 
-        // Open position
-        logger.info(`Opening ${direction} position for ${asset}`);
-        const tx = await zetaWrapper.openPosition(direction, constants.Asset[asset]);
+        await zetaWrapper.cancelAllTriggerOrders(constants.Asset[asset]);
 
-        logger.info("Position opened successfully:", {
-            asset,
-            direction,
-            transaction: tx
-        });
+        // // Open position
+        // logger.info(`Opening ${direction} position for ${asset}`);
+        // const tx = await zetaWrapper.openPosition(direction, constants.Asset[asset]);
+
+        // logger.info("Position opened successfully:", {
+        //     asset,
+        //     direction,
+        //     transaction: tx
+        // });
+
+
 
         // Cleanup
         await priorityFees.unsubscribe();
@@ -135,4 +139,6 @@ if (process.argv[2] && process.argv[3]) {
     }
     
     openTestPosition(asset, direction);
+
+
 }

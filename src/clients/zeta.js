@@ -245,14 +245,13 @@ export class ZetaClientWrapper {
 		}
 	}
 
-
 	async cancelAllTriggerOrders(marketIndex) {
 		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
 
 		if (openTriggerOrders && openTriggerOrders.length > 0) {
 			logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
 			await this.client.cancelAllTriggerOrders(marketIndex);
-			logger.info("Trigger Orders Cancelled.", triggerOrderTxs);
+			logger.info("Trigger Orders Cancelled.");
 		} else {
 			logger.info(`No Trigger Orders found.`);
 		}
@@ -337,8 +336,8 @@ Opening ${direction} position:
 				undefined,
 				{
 					skipPreflight: true,
-					preflightCommitment: "confirmed",
-					commitment: "confirmed",
+					preflightCommitment: "finalized",
+					commitment: "finalized",
 				},
 				false,
 				utils.getZetaLutArr()

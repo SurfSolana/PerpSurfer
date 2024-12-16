@@ -77,15 +77,12 @@ export async function initializeExchange(markets) {
       connection,
       {
         skipPreflight: true,
-        preflightCommitment: "confirmed",
-        commitment: "confirmed",
+        preflightCommitment: "finalized",
+        commitment: "finalized",
       },
-      25,
+      50,
       true,
-      connection,
-      marketsArray,
-      undefined,
-      marketsArray
+      connection
     );
 
     await Exchange.load(loadExchangeConfig);
@@ -442,11 +439,10 @@ export class DirectionalTradingManager {
           }
         } else {
           logger.info(`[INIT] No existing ${this.direction} position found for ${symbol}`);
+          await this.zetaWrapper.cancelAllTriggerOrders(constants.Asset[symbol]);
         }
       } catch (error) {
         logger.error(`[INIT] Error checking ${symbol} position:`, error);
-        
-        await this.zetaWrapper.cancelAllTriggerOrders(constants.Asset[symbol]);
       }
     }
   }
@@ -719,7 +715,7 @@ class SymbolTradingManager {
               this.stopMonitoring(positionId);
               return;
             }
-            
+
           }
         } catch (error) {
           logger.error(`[${this.symbol}] Error during stop loss adjustment:`, error);
