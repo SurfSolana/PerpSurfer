@@ -437,6 +437,7 @@ export class DirectionalTradingManager {
               signal: 0,
             });
           }
+          await utils.sleep(250); // jitter
         } else {
           logger.info(`[INIT] No existing ${this.direction} position found for ${symbol}`);
           await this.zetaWrapper.cancelAllTriggerOrders(constants.Asset[symbol]);
@@ -919,40 +920,11 @@ async function main() {
 
     // Initialize Exchange and priority fees first
     const marketIndices = tradingSymbols.map((symbol) => constants.Asset[symbol]);
-    const { connection, priorityFees } = await initializeExchange(marketIndices);
+    const { connection } = await initializeExchange(marketIndices);
 
     const multiManager = new MultiTradingManager();
-    await multiManager.initialize(tradingSymbols);
+    await multiManager.initialize(connection);
 
-    // Start priority fee update interval
-    const updateInterval = setInterval(async () => {
-      try {
-        await priorityFees.load();
-        const recentFees = await fetchSolanaPriorityFee(connection, 150, []);
-        const newFee = recentFees?.slice(0, 10).reduce((sum, fee) => sum + fee.prioritizationFee, 0) / 10 || 1_000;
-        const currentPriorityFee = Math.floor(newFee * 5);
-        Exchange.updatePriorityFee(currentPriorityFee);
-      } catch (error) {
-        logger.error("Error updating priority fees:", error);
-      }
-    }, 5000);
-
-    // Add cleanup of priority fee interval
-    process.on("SIGINT", () => {
-      logger.info("[SHUTDOWN] Graceful shutdown initiated");
-      clearInterval(updateInterval);
-      priorityFees.unsubscribe().catch(console.error);
-      multiManager.shutdown();
-      process.exit(0);
-    });
-
-    process.on("SIGTERM", () => {
-      logger.info("[SHUTDOWN] Graceful shutdown initiated");
-      clearInterval(updateInterval);
-      priorityFees.unsubscribe().catch(console.error);
-      multiManager.shutdown();
-      process.exit(0);
-    });
   } catch (error) {
     logger.error("[MAIN] Fatal error:", error);
     process.exit(1);

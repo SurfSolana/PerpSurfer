@@ -1,4 +1,16 @@
-import { Wallet, CrossClient, Exchange, Network, Market, utils, types, assets, constants, events } from "@zetamarkets/sdk";
+import {
+	Wallet,
+	CrossClient,
+	Exchange,
+	Network,
+	Market,
+	instructions,
+	utils,
+	types,
+	assets,
+	constants,
+	events,
+} from "@zetamarkets/sdk";
 import {
 	PublicKey,
 	Connection,
@@ -50,10 +62,38 @@ export class ZetaClientWrapper {
 		return Math.round(price / tickSize) * tickSize;
 	}
 
-	async initialize(markets = [constants.Asset.SOL], keypairPath = null) {
+  async initializeExchange(markets) {
+
+    // Initialize connection and exchange
+    this.connection = new Connection(process.env.RPC_TRADINGBOT);
+  
+    // Create set of markets to load
+    const marketsToLoad = new Set([constants.Asset.SOL, ...markets]);
+    const marketsArray = Array.from(marketsToLoad);
+  
+    const loadExchangeConfig = types.defaultLoadExchangeConfig(
+      Network.MAINNET,
+      this.connection,
+      {
+        skipPreflight: true,
+        preflightCommitment: "finalized",
+        commitment: "finalized",
+      },
+      25,
+      true,
+      // this.connection,
+      // marketsArray,
+      // undefined,
+      // marketsArray
+    );
+  
+    await Exchange.load(loadExchangeConfig);
+    logger.info("Exchange loaded successfully");
+  }
+
+	async initialize(keypairPath = null) {
 		try {
 			const keyPath = keypairPath || process.env.KEYPAIR_FILE_PATH;
-			this.connection = new Connection(process.env.RPC_TRADINGBOT);
 
 			// Load wallet
 			const secretKeyString = fs.readFileSync(keyPath, "utf8");
@@ -63,16 +103,16 @@ export class ZetaClientWrapper {
 
 			logger.info("Wallet initialized", { usingPath: keyPath });
 
+
 			// Create client
 			this.client = await CrossClient.load(
-				this.connection,
-				this.wallet,
-				undefined,
-				undefined,
-				undefined,
-				undefined,
-				true,
-				undefined
+				this.connection, // connection: Connection,
+				this.wallet, // wallet: types.Wallet,
+        { skipPreflight: true, preflightCommitment: "finalized", commitment: "finalized"}, // opts: ConfirmOptions = utils.defaultCommitment(),
+        undefined, // callback
+				false, // throttle: boolean = false
+				undefined, // delegator : PublicKey = undefined,
+				true, // useVersionedTxs: boolean = false,
 			);
 
 			logger.info("ZetaClientWrapper initialized successfully");
@@ -136,52 +176,61 @@ export class ZetaClientWrapper {
 	}
 
 	async updatePriorityFees() {
-		try {
-			if (!this.priorityFees) {
-				throw new Error("Priority Fees not initialized");
-			}
+		const helius_url = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
 
-			await this.priorityFees.load();
+		const response = await fetch(helius_url, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "getPriorityFeeEstimate",
+				params: [
+					{
+						accountKeys: ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
+						options: {
+							includeAllPriorityFeeLevels: true,
+						},
+					},
+				],
+			}),
+		});
 
-			const recentFees = await fetchSolanaPriorityFee(this.connection, 150, []);
+		const data = await response.json();
 
-			const newFee =
-				recentFees?.slice(0, 10).reduce((sum, fee) => sum + fee.prioritizationFee, 0) / 10 || this.currentPriorityFee;
+		/*
+    ============================================
+     data.result.priorityFeeLevels.___
+    ============================================
+    Valid Options: min, low, medium, ** high **, 
+                   veryHigh, unsafeMax
+    */
 
-			this.currentPriorityFee = Math.floor(newFee * this.priorityFeeMultiplier);
+		Exchange.setUseAutoPriorityFee(false);
+		Exchange.updatePriorityFee(data.result.priorityFeeLevels.high * 1.25);
 
-			logger.info("Updated Priority Fee:", {
-				rawFee: newFee,
-				adjustedFee: this.currentPriorityFee,
-				multiplier: this.priorityFeeMultiplier,
-			});
-
-			Exchange.updatePriorityFee(this.currentPriorityFee);
-		} catch (error) {
-			logger.error("Error updating priority fees:", error);
-			throw error;
-		}
+		console.log("Fees: ", data.result.priorityFeeLevels);
+		console.log("Fee Level (high): ", data.result.priorityFeeLevels.high);
+		console.log("Exchange set to fee * 1.25:", Exchange._priorityFee);
 	}
 
 	isExchangeInitialized() {
 		return typeof Exchange !== "undefined" && Exchange && Exchange.initialized;
 	}
 
-	async getPosition(marketIndex) {
-		try {
-			await this.client.updateState();
-			const positions = this.client.getPositions(marketIndex);
-			console.log("Position check:", {
-				marketIndex,
-				hasPosition: !!positions[0],
-				size: positions[0]?.size || 0,
-			});
-			return positions[0] || null;
-		} catch (error) {
-			logger.error("Error getting position:", error);
-			throw error;
-		}
+  async getPosition(marketIndex) {
+		await this.client.updateState();
+		const positions = this.client.getPositions(marketIndex);
+		console.log("Position check:", {
+			marketIndex,
+			hasPosition: !!positions[0],
+			size: positions[0]?.size || 0,
+		});
+		return positions[0] || null;
 	}
+
 
 	getCalculatedMarkPrice(asset = this.activeMarket) {
 		try {
@@ -200,9 +249,9 @@ export class ZetaClientWrapper {
 	}
 
 	async adjustStopLossOrder(newPrices, asset, positionSize) {
-    console.log("Reached threshold, do nothing for now.");
-    return true;
-  }
+		console.log("Reached threshold, do nothing for now.");
+		return true;
+	}
 
 	async checkPositionProgress() {
 		try {
@@ -246,16 +295,19 @@ export class ZetaClientWrapper {
 	}
 
 	async cancelAllTriggerOrders(marketIndex) {
+    await this.client.updateState();
 		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
 
 		if (openTriggerOrders && openTriggerOrders.length > 0) {
 			logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
-			await this.client.cancelAllTriggerOrders(marketIndex);
+      const txids = await this.client.cancelAllTriggerOrders(marketIndex);
 			logger.info("Trigger Orders Cancelled.");
+			return txids;
 		} else {
 			logger.info(`No Trigger Orders found.`);
 		}
 	}
+
 
 	async openPosition(direction, marketIndex = this.activeMarket, makerOrTaker = "maker") {
 		logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
@@ -263,7 +315,40 @@ export class ZetaClientWrapper {
 		const settings = this.fetchSettings();
 		logger.info(`Using settings:`, settings);
 
+		await this.client.updateState(true, true);
+
+		let transaction = new Transaction().add(
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 500_000,
+			})
+		);
+
+		// let assetIndex = assets.assetToIndex(marketIndex);
+		// let market = Exchange.getPerpMarket(marketIndex);
+		// let openOrdersPda = null;
+		// if (this.client._openOrdersAccounts[assetIndex].equals(PublicKey.default)) {
+		//   console.log(
+		//     `[${assets.assetToName(
+		//       marketIndex
+		//     )}] User doesn't have open orders account. Initialising for asset ${marketIndex}.`
+		//   );
+
+		//   let [initIx, _openOrdersPda] = instructions.initializeOpenOrdersV3Ix(
+		//     marketIndex,
+		//     Exchange.getPerpMarket(marketIndex).address,
+		//     this.client._provider.wallet.publicKey,
+		//     this.client._accountAddress
+		//   );
+		//   openOrdersPda = _openOrdersPda;
+		//   transaction.add(initIx);
+		// } else {
+		//   openOrdersPda = this.client._openOrdersAccounts[assetIndex];
+		// }
+
 		const balance = Exchange.riskCalculator.getCrossMarginAccountState(this.client.account).balance;
+
+		console.log(`BALANCE:`, balance);
+
 		const side = direction === "long" ? types.Side.BID : types.Side.ASK;
 
 		const { currentPrice, adjustedPrice, positionSize, nativeLotSize } = this.calculatePricesAndSize(
@@ -294,18 +379,10 @@ Opening ${direction} position:
       SL Price ⟶ $${stopLossPrice.toFixed(4)}
 ------------------------------`);
 
-		// await this.updatePriorityFees();
+		await this.updatePriorityFees();
 
-		await this.client.updateState(true, true);
-
-		let transaction = new Transaction().add(
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 350_000,
-			})
-		);
-
-		const triggerBit_TP = this.client.findAvailableTriggerOrderBit();
-		const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1);
+		const triggerBit_TP = this.client.findAvailableTriggerOrderBit() || 0;
+		const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1) || 1;
 
 		const mainOrderIx = this.createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, "taker");
 		const tpOrderIx = this.createTPOrderInstruction(
@@ -361,6 +438,102 @@ Opening ${direction} position:
 		}
 	}
 
+	async closePosition(direction, marketIndex) {
+		await Exchange.updateState();
+		await this.client.updateState(true, true);
+
+		let position = await this.client.getPositions(this.positionState.marketIndex);
+
+    console.log(position);
+
+		if (position) {
+			position = position[0];
+			logger.info(`Closing position for ${assets.assetToName(marketIndex)}`, position);
+		} else {
+			logger.info(`No position to close for ${assets.assetToName(marketIndex)}`);
+			return;
+		}
+
+		// Calculate position size
+		const rawPositionSize = Math.abs(position.size);
+		const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
+		const lotSize = Math.round(rawPositionSize / decimalMinLotSize);
+		const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
+		const actualPositionSize = lotSize * decimalMinLotSize;
+
+		logger.info(`Lots Debug:`, {
+			rawPositionSize,
+			decimalMinLotSize,
+			lotSize,
+			nativeLotSize,
+			actualPositionSize,
+		});
+
+		await this.client.updateState();
+
+		await this.updatePriorityFees();
+
+		const side = direction == "long" ? types.Side.ASK : types.Side.BID;
+
+		const closePrice = this.getClosePrice(marketIndex, side);
+
+		let transaction = new Transaction();
+
+		const mainOrderIx = this.createMainOrderInstruction(marketIndex, closePrice, nativeLotSize, side, "taker");
+
+		transaction.add(mainOrderIx);
+
+		try {
+			const txid = await utils.processTransaction(
+				this.client.provider,
+				transaction,
+				undefined,
+				{
+					skipPreflight: true,
+					preflightCommitment: "finalized",
+					commitment: "finalized",
+				},
+				false,
+				utils.getZetaLutArr()
+			);
+
+			logger.info(`Transaction sent successfully. txid: ${txid}`);
+
+			return txid;
+		} catch (error) {
+			logger.error(`Close Position TX Error:`, error);
+		}
+	}
+
+	getClosePrice(marketIndex, side) {
+		// Get orderbook data
+		Exchange.getPerpMarket(marketIndex).forceFetchOrderbook();
+		const orderbook = Exchange.getOrderbook(marketIndex);
+
+		if (!orderbook?.asks?.[0]?.price || !orderbook?.bids?.[0]?.price) {
+			throw new Error("Invalid orderbook data for price calculation");
+		}
+
+		// Calculate current price based on side
+		const currentPrice = side === types.Side.BID ? orderbook.asks[0].price : orderbook.bids[0].price;
+
+		const makerOrTaker = "taker";
+
+		// Calculate adjusted price with slippage
+		const slippage = 0.0001;
+		const closePrice = this.roundToTickSize(
+			makerOrTaker === "maker"
+				? side === types.Side.BID
+					? currentPrice + slippage
+					: currentPrice - slippage
+				: side === types.Side.BID
+				? currentPrice * (1 + slippage * 5)
+				: currentPrice * (1 - slippage * 5)
+		);
+
+		return closePrice;
+	}
+
 	getTriggerOrders(marketIndex = this.activeMarket) {
 		try {
 			return this.client.getTriggerOrders(marketIndex);
@@ -372,7 +545,7 @@ Opening ${direction} position:
 
 	fetchSettings() {
 		const settings = {
-			leverageMultiplier: 4,
+			leverageMultiplier: 0.3,
 			takeProfitPercentage: 0.036,
 			stopLossPercentage: 0.018,
 			trailingStopLoss: {
@@ -455,12 +628,20 @@ Opening ${direction} position:
 
 		const positionSize = (balance * settings.leverageMultiplier) / currentPrice;
 		const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
-		const lotSize = Math.floor(positionSize / decimalMinLotSize);
+		const lotSize = Math.round(positionSize / decimalMinLotSize);
 		const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
 
-		logger.info(`Order Size: ${positionSize.toFixed(1)}`);
-		logger.info(`Lot Size: ${lotSize}`);
-		logger.info(`Native Lot Size: ${nativeLotSize}`);
+
+		logger.info(`Lots Debug:`, {
+			positionSize,
+			decimalMinLotSize,
+			lotSize,
+			nativeLotSize
+		});
+
+		// logger.info(`Order Size: ${positionSize.toFixed(6)}`);
+		// logger.info(`Rounded Lot Size: ${lotSize}`);
+		// logger.info(`Native Lot Size: ${nativeLotSize}`);
 
 		return {
 			currentPrice,
