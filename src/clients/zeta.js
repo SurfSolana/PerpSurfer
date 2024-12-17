@@ -221,16 +221,20 @@ export class ZetaClientWrapper {
 	}
 
   async getPosition(marketIndex) {
-		await this.client.updateState();
-		const positions = this.client.getPositions(marketIndex);
-		console.log("Position check:", {
-			marketIndex,
-			hasPosition: !!positions[0],
-			size: positions[0]?.size || 0,
-		});
-		return positions[0] || null;
-	}
-
+    try {
+      await this.client.updateState();
+      const positions = this.client.getPositions(marketIndex);
+      console.log("Position check:", {
+        marketIndex,
+        hasPosition: !!positions[0],
+        size: positions[0]?.size || 0,
+      });
+      return positions[0] || null;
+    } catch (error) {
+      logger.error("Error getting position:", error);
+      throw error;
+    }
+  }
 
 	getCalculatedMarkPrice(asset = this.activeMarket) {
 		try {
@@ -323,27 +327,27 @@ export class ZetaClientWrapper {
 			})
 		);
 
-		// let assetIndex = assets.assetToIndex(marketIndex);
-		// let market = Exchange.getPerpMarket(marketIndex);
-		// let openOrdersPda = null;
-		// if (this.client._openOrdersAccounts[assetIndex].equals(PublicKey.default)) {
-		//   console.log(
-		//     `[${assets.assetToName(
-		//       marketIndex
-		//     )}] User doesn't have open orders account. Initialising for asset ${marketIndex}.`
-		//   );
+		let assetIndex = assets.assetToIndex(marketIndex);
+		let market = Exchange.getPerpMarket(marketIndex);
+		let openOrdersPda = null;
+		if (this.client._openOrdersAccounts[assetIndex].equals(PublicKey.default)) {
+		  console.log(
+		    `[${assets.assetToName(
+		      marketIndex
+		    )}] User doesn't have open orders account. Initialising for asset ${marketIndex}.`
+		  );
 
-		//   let [initIx, _openOrdersPda] = instructions.initializeOpenOrdersV3Ix(
-		//     marketIndex,
-		//     Exchange.getPerpMarket(marketIndex).address,
-		//     this.client._provider.wallet.publicKey,
-		//     this.client._accountAddress
-		//   );
-		//   openOrdersPda = _openOrdersPda;
-		//   transaction.add(initIx);
-		// } else {
-		//   openOrdersPda = this.client._openOrdersAccounts[assetIndex];
-		// }
+		  let [initIx, _openOrdersPda] = instructions.initializeOpenOrdersV3Ix(
+		    marketIndex,
+		    Exchange.getPerpMarket(marketIndex).address,
+		    this.client._provider.wallet.publicKey,
+		    this.client._accountAddress
+		  );
+		  openOrdersPda = _openOrdersPda;
+		  transaction.add(initIx);
+		} else {
+		  openOrdersPda = this.client._openOrdersAccounts[assetIndex];
+		}
 
 		const balance = Exchange.riskCalculator.getCrossMarginAccountState(this.client.account).balance;
 
@@ -442,7 +446,7 @@ Opening ${direction} position:
 		await Exchange.updateState();
 		await this.client.updateState(true, true);
 
-		let position = await this.client.getPositions(this.positionState.marketIndex);
+		let position = await this.client.getPositions(marketIndex);
 
     console.log(position);
 
@@ -545,7 +549,7 @@ Opening ${direction} position:
 
 	fetchSettings() {
 		const settings = {
-			leverageMultiplier: 0.3,
+			leverageMultiplier: 0.1,
 			takeProfitPercentage: 0.036,
 			stopLossPercentage: 0.018,
 			trailingStopLoss: {
