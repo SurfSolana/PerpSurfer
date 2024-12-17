@@ -166,6 +166,7 @@ export class ZetaClientWrapper {
     try {
       await this.client.updateState();
       const positions = this.client.getPositions(marketIndex);
+
       console.log("Position check:", {
         marketIndex,
         hasPosition: !!positions[0],
