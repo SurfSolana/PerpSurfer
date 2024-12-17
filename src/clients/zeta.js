@@ -401,7 +401,7 @@ Opening ${direction} position:
       SL Price ⟶ $${stopLossPrice.toFixed(4)}
 ------------------------------`);
 
-		await this.updatePriorityFees();
+		await updatePriorityFees();
 
 		const triggerBit_TP = this.client.findAvailableTriggerOrderBit() || 0;
 		const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1) || 1;
@@ -494,7 +494,7 @@ Opening ${direction} position:
 
 		await this.client.updateState();
 
-		await this.updatePriorityFees();
+		await updatePriorityFees();
 
 		const side = direction == "long" ? types.Side.ASK : types.Side.BID;
 
