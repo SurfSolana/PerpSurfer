@@ -34,7 +34,7 @@ const MONITORING_INTERVALS = {
  * @returns {string[]} Array of validated trading symbols
  * @throws {Error} If configuration is invalid
  */
-export function validateConfig() {
+function validateConfig() {
   // Essential environment variables that must be present
   const requiredEnvVars = ["KEYPAIR_FILE_PATH_LONG", "KEYPAIR_FILE_PATH_SHORT", "WS_API_KEY", "RPC_TRADINGBOT"];
 
@@ -64,7 +64,7 @@ export function validateConfig() {
   return tradingSymbols;
 }
 
-export async function initializeExchange(markets) {
+async function initializeExchange(markets) {
   try {
     const connection = new Connection(process.env.RPC_TRADINGBOT);
 
@@ -80,9 +80,12 @@ export async function initializeExchange(markets) {
         preflightCommitment: "finalized",
         commitment: "finalized",
       },
-      50,
+      500,
       true,
-      connection
+      connection,
+      marketsArray,
+      undefined,
+      marketsArray
     );
 
     await Exchange.load(loadExchangeConfig);
@@ -341,7 +344,7 @@ class MultiTradingManager {
  * Manages trading operations for a specific direction (long/short)
  * Coordinates multiple symbols while maintaining direction-specific logic
  */
-export class DirectionalTradingManager {
+class DirectionalTradingManager {
   constructor(direction, symbols) {
     this.direction = direction; // 'long' or 'short'
     this.symbols = symbols; // Array of trading symbols
@@ -358,11 +361,8 @@ export class DirectionalTradingManager {
       this.zetaWrapper = new ZetaClientWrapper();
       const keypairPath = this.direction === "long" ? process.env.KEYPAIR_FILE_PATH_LONG : process.env.KEYPAIR_FILE_PATH_SHORT;
 
-      // Get all market indices at once
-      const marketIndices = this.symbols.map((symbol) => constants.Asset[symbol]);
-
-      // Initialize one client with all market indices
-      await this.zetaWrapper.initialize(marketIndices, keypairPath);
+      // Initialize one client
+      await this.zetaWrapper.initialize(keypairPath);
       logger.info(
         `[INIT] ZetaWrapper initialized for ${this.direction} trading with markets:`,
         marketIndices.map((idx) => constants.Asset[idx])
@@ -437,10 +437,8 @@ export class DirectionalTradingManager {
               signal: 0,
             });
           }
-          await utils.sleep(250); // jitter
         } else {
           logger.info(`[INIT] No existing ${this.direction} position found for ${symbol}`);
-          await this.zetaWrapper.cancelAllTriggerOrders(constants.Asset[symbol]);
         }
       } catch (error) {
         logger.error(`[INIT] Error checking ${symbol} position:`, error);
@@ -484,14 +482,13 @@ class SymbolTradingManager {
     try {
       const recentFees = await fetchSolanaPriorityFee(this.zetaWrapper.connection, 150, []);
       const newFee = recentFees?.slice(0, 10).reduce((sum, fee) => sum + fee.prioritizationFee, 0) / 10 || 1_000;
-      const multiplier = 10;
-      const currentPriorityFee = Math.floor(newFee * multiplier);
+      const currentPriorityFee = Math.floor(newFee * 5);
 
       Exchange.updatePriorityFee(currentPriorityFee);
       logger.info("Updated transaction priority fee:", {
         baseFee: newFee,
         adjustedFee: currentPriorityFee,
-        multiplier: multiplier,
+        multiplier: 5,
       });
 
       return currentPriorityFee;
@@ -711,12 +708,11 @@ class SymbolTradingManager {
             const updatedOrders = await this.zetaWrapper.getTriggerOrders(this.marketIndex);
             const updatedStopLoss = updatedOrders.find(order => order.triggerOrderBit === stopLoss.triggerOrderBit);
 
-            if (updatedStopLoss) {
+            if (updatedStopLoss && updatedStopLoss.orderPrice !== stopLoss.orderPrice) {
               logger.info(`[${this.symbol}] Stop loss successfully adjusted`);
               this.stopMonitoring(positionId);
               return;
             }
-
           }
         } catch (error) {
           logger.error(`[${this.symbol}] Error during stop loss adjustment:`, error);
@@ -776,38 +772,38 @@ class SymbolTradingManager {
     return progressPercent >= requiredProgress;
   }
 
-  // async hasOriginalStopLoss(position) {
-  //   const triggerOrders = await this.zetaWrapper.getTriggerOrders(this.marketIndex);
-  //   const isShort = position.size < 0;
+  async hasOriginalStopLoss(position) {
+    const triggerOrders = await this.zetaWrapper.getTriggerOrders(this.marketIndex);
+    const isShort = position.size < 0;
 
-  //   const stopLoss = triggerOrders.find((order) => (isShort ? 
-  //     order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL : 
-  //     order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL));
+    const stopLoss = triggerOrders.find((order) => (isShort ? 
+      order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL : 
+      order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL));
 
-  //   if (!stopLoss) return false;
+    if (!stopLoss) return false;
 
-  //   const currentStopLossPrice = stopLoss.orderPrice / 1e6;
-  //   const entryPrice = Math.abs(position.costOfTrades / position.size);
+    const currentStopLossPrice = stopLoss.orderPrice / 1e6;
+    const entryPrice = Math.abs(position.costOfTrades / position.size);
 
-  //   const { stopLossPrice: originalStopLoss } = this.zetaWrapper.calculateTPSLPrices(
-  //     isShort ? "short" : "long", 
-  //     entryPrice, 
-  //     await this.zetaWrapper.fetchSettings()
-  //   );
+    const { stopLossPrice: originalStopLoss } = this.zetaWrapper.calculateTPSLPrices(
+      isShort ? "short" : "long", 
+      entryPrice, 
+      await this.zetaWrapper.fetchSettings()
+    );
 
-  //   const difference = Math.abs(currentStopLossPrice - originalStopLoss) / originalStopLoss;
+    const difference = Math.abs(currentStopLossPrice - originalStopLoss) / originalStopLoss;
 
-  //   console.log(`[${this.symbol}] Stop Loss Analysis:`, {
-  //     direction: isShort ? "SHORT" : "LONG",
-  //     entryPrice: entryPrice.toFixed(4),
-  //     originalStopLoss: originalStopLoss.toFixed(4),
-  //     currentStopLoss: currentStopLossPrice.toFixed(4),
-  //     difference: (difference * 100).toFixed(2) + "%",
-  //     isOriginal: difference < 0.005,
-  //   });
+    console.log(`[${this.symbol}] Stop Loss Analysis:`, {
+      direction: isShort ? "SHORT" : "LONG",
+      entryPrice: entryPrice.toFixed(4),
+      originalStopLoss: originalStopLoss.toFixed(4),
+      currentStopLoss: currentStopLossPrice.toFixed(4),
+      difference: (difference * 100).toFixed(2) + "%",
+      isOriginal: difference < 0.001,
+    });
 
-  //   return difference < 0.005;
-  // }
+    return difference < 0.001;
+  }
 
   
   async hasOriginalStopLoss(position) {
@@ -824,7 +820,7 @@ class SymbolTradingManager {
     const { stopLossPrice: originalStopLoss } = this.zetaWrapper.calculateTPSLPrices(isShort ? "short" : "long", entryPrice, await this.zetaWrapper.fetchSettings());
 
     const difference = Math.abs(currentStopLossPrice - originalStopLoss) / originalStopLoss;
-    return difference < 0.005; // Return true if at original stop loss
+    return difference < 0.001; // Return true if at original stop loss
   }
 
   generatePositionId(position) {
@@ -896,10 +892,9 @@ async function setupPriorityFees(connection) {
       multiplier: priorityFeeMultiplier,
     });
 
+    Exchange.updatePriorityFee(currentPriorityFee);
     Exchange.setUseAutoPriorityFee(false);
 
-    Exchange.updatePriorityFee(currentPriorityFee);
-    
     return priorityFees;
   } catch (error) {
     logger.error("Error setting up priority fees:", error);
@@ -920,11 +915,42 @@ async function main() {
 
     // Initialize Exchange and priority fees first
     const marketIndices = tradingSymbols.map((symbol) => constants.Asset[symbol]);
-    const { connection } = await initializeExchange(marketIndices);
+    
+    const zetaWrapper = new ZetaClientWrapper();
+    await zetaWrapper.initializeExchange(marketIndices);
 
     const multiManager = new MultiTradingManager();
-    await multiManager.initialize(connection);
+    await multiManager.initialize(tradingSymbols);
 
+    // Start priority fee update interval
+    const updateInterval = setInterval(async () => {
+      try {
+        await priorityFees.load();
+        const recentFees = await fetchSolanaPriorityFee(connection, 150, []);
+        const newFee = recentFees?.slice(0, 10).reduce((sum, fee) => sum + fee.prioritizationFee, 0) / 10 || 1_000;
+        const currentPriorityFee = Math.floor(newFee * 5);
+        Exchange.updatePriorityFee(currentPriorityFee);
+      } catch (error) {
+        logger.error("Error updating priority fees:", error);
+      }
+    }, 5000);
+
+    // Add cleanup of priority fee interval
+    process.on("SIGINT", () => {
+      logger.info("[SHUTDOWN] Graceful shutdown initiated");
+      clearInterval(updateInterval);
+      priorityFees.unsubscribe().catch(console.error);
+      multiManager.shutdown();
+      process.exit(0);
+    });
+
+    process.on("SIGTERM", () => {
+      logger.info("[SHUTDOWN] Graceful shutdown initiated");
+      clearInterval(updateInterval);
+      priorityFees.unsubscribe().catch(console.error);
+      multiManager.shutdown();
+      process.exit(0);
+    });
   } catch (error) {
     logger.error("[MAIN] Fatal error:", error);
     process.exit(1);

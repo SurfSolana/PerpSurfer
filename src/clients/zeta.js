@@ -23,7 +23,7 @@ import {
 import fs from "fs";
 import dotenv from "dotenv";
 import logger from "../utils/logger.js";
-import { BN, PriorityFeeMethod, PriorityFeeSubscriber, fetchSolanaPriorityFee } from "@drift-labs/sdk";
+import { BN } from "@drift-labs/sdk";
 
 dotenv.config();
 
@@ -122,59 +122,6 @@ export class ZetaClientWrapper {
 		}
 	}
 
-	async setupPriorityFees() {
-		try {
-			const config = {
-				priorityFeeMethod: PriorityFeeMethod.SOLANA,
-				frequencyMs: 5000,
-				connection: this.connection,
-			};
-
-			logger.info("Initializing Solana Priority Fees with config:", {
-				method: config.priorityFeeMethod,
-				frequency: config.frequencyMs,
-				hasConnection: !!this.connection,
-			});
-
-			this.priorityFees = new PriorityFeeSubscriber({
-				...config,
-				lookbackDistance: 150,
-				addresses: [],
-				connection: this.connection,
-			});
-
-			logger.info("Subscribing to priority fees...");
-			await this.priorityFees.subscribe();
-
-			logger.info("Loading priority fee data...");
-			await this.priorityFees.load();
-
-			const recentFees = await fetchSolanaPriorityFee(this.connection, 150, []);
-
-			logger.info("Recent Priority Fees:", {
-				numFees: recentFees?.length,
-				latestFee: recentFees?.[0]?.prioritizationFee,
-				oldestFee: recentFees?.[recentFees.length - 1]?.prioritizationFee,
-				latestSlot: recentFees?.[0]?.slot,
-				oldestSlot: recentFees?.[recentFees.length - 1]?.slot,
-			});
-
-			const initialFee = recentFees?.slice(0, 10).reduce((sum, fee) => sum + fee.prioritizationFee, 0) / 10 || 1_000;
-
-			this.currentPriorityFee = Math.floor(initialFee * this.priorityFeeMultiplier);
-
-			logger.info("Priority Fees Setup Complete", {
-				subscriber: !!this.priorityFees,
-				initialFee,
-				adjustedFee: this.currentPriorityFee,
-				multiplier: this.priorityFeeMultiplier,
-			});
-		} catch (error) {
-			logger.error("Error setting up priority fees:", error);
-			throw error;
-		}
-	}
-
 	async updatePriorityFees() {
 		const helius_url = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
 
@@ -222,8 +169,8 @@ export class ZetaClientWrapper {
 
   async getPosition(marketIndex) {
     try {
-      await this.client.updateState();
-      const positions = this.client.getPositions(marketIndex);
+      await this.client.updateState(true, true);
+      const positions = await this.client.getPositions(marketIndex);
       console.log("Position check:", {
         marketIndex,
         hasPosition: !!positions[0],
@@ -252,51 +199,51 @@ export class ZetaClientWrapper {
 		}
 	}
 
-	async adjustStopLossOrder(newPrices, asset, positionSize) {
-		console.log("Reached threshold, do nothing for now.");
-		return true;
-	}
+	// async adjustStopLossOrder(newPrices, asset, positionSize) {
+	// 	console.log("Reached threshold, do nothing for now.");
+	// 	return true;
+	// }
 
-	async checkPositionProgress() {
-		try {
-			if (this.positionState.hasAdjustedStopLoss) {
-				this.stopPositionMonitoring();
-				return;
-			}
+	// async checkPositionProgress() {
+	// 	try {
+	// 		if (this.positionState.hasAdjustedStopLoss) {
+	// 			this.stopPositionMonitoring();
+	// 			return;
+	// 		}
 
-			await this.client.updateState();
+	// 		await this.client.updateState();
 
-			const positions = this.client.getPositions(this.positionState.marketIndex);
-			const currentPosition = positions[0];
+	// 		const positions = this.client.getPositions(this.positionState.marketIndex);
+	// 		const currentPosition = positions[0];
 
-			if (!currentPosition) {
-				logger.info("Position closed, stopping monitoring");
-				this.stopPositionMonitoring();
-				return;
-			}
+	// 		if (!currentPosition) {
+	// 			logger.info("Position closed, stopping monitoring");
+	// 			this.stopPositionMonitoring();
+	// 			return;
+	// 		}
 
-			const currentPrice = await this.getCalculatedMarkPrice(this.positionState.marketIndex);
-			const newStopLossPrices = this.calculateTrailingStopLoss(currentPrice);
+	// 		const currentPrice = await this.getCalculatedMarkPrice(this.positionState.marketIndex);
+	// 		const newStopLossPrices = this.calculateTrailingStopLoss(currentPrice);
 
-			if (newStopLossPrices) {
-				const adjustmentSuccess = await this.adjustStopLossOrder(newStopLossPrices);
-				if (!adjustmentSuccess) {
-					throw new Error("Failed to adjust stop loss");
-				}
+	// 		if (newStopLossPrices) {
+	// 			const adjustmentSuccess = await this.adjustStopLossOrder(newStopLossPrices);
+	// 			if (!adjustmentSuccess) {
+	// 				throw new Error("Failed to adjust stop loss");
+	// 			}
 
-				const verificationSuccess = await this.verifyStopLossAdjustment(newStopLossPrices);
-				if (!verificationSuccess) {
-					throw new Error("Stop loss adjustment failed verification");
-				}
+	// 			const verificationSuccess = await this.verifyStopLossAdjustment(newStopLossPrices);
+	// 			if (!verificationSuccess) {
+	// 				throw new Error("Stop loss adjustment failed verification");
+	// 			}
 
-				this.positionState.hasAdjustedStopLoss = true;
-				this.stopPositionMonitoring();
-			}
-		} catch (error) {
-			logger.error("Error checking position progress:", error);
-			throw error;
-		}
-	}
+	// 			this.positionState.hasAdjustedStopLoss = true;
+	// 			this.stopPositionMonitoring();
+	// 		}
+	// 	} catch (error) {
+	// 		logger.error("Error checking position progress:", error);
+	// 		throw error;
+	// 	}
+	// }
 
 	async cancelAllTriggerOrders(marketIndex) {
     await this.client.updateState();
@@ -446,7 +393,7 @@ Opening ${direction} position:
 		await Exchange.updateState();
 		await this.client.updateState(true, true);
 
-		let position = await this.client.getPositions(marketIndex);
+    let position = await this.client.getPositions(marketIndex); // <- RIGHT WAY
 
     console.log(position);
 
@@ -714,139 +661,139 @@ Opening ${direction} position:
 		);
 	}
 
-	calculateTrailingStopLoss(currentPrice, customPercentage = null) {
-		const { position, orders, entryPrice } = this.positionState;
-		if (!position || !orders?.takeProfit || !entryPrice) {
-			throw new Error("Invalid position state for trailing stop loss calculation");
-		}
+// 	calculateTrailingStopLoss(currentPrice, customPercentage = null) {
+// 		const { position, orders, entryPrice } = this.positionState;
+// 		if (!position || !orders?.takeProfit || !entryPrice) {
+// 			throw new Error("Invalid position state for trailing stop loss calculation");
+// 		}
 
-		const isShort = position.size < 0;
-		const entryPriceDecimal = this.roundToTickSize(entryPrice / 1e6);
-		const tpPriceDecimal = this.roundToTickSize(orders.takeProfit.orderPrice / 1e6);
+// 		const isShort = position.size < 0;
+// 		const entryPriceDecimal = this.roundToTickSize(entryPrice / 1e6);
+// 		const tpPriceDecimal = this.roundToTickSize(orders.takeProfit.orderPrice / 1e6);
 
-		if (customPercentage !== null) {
-			const stopLossPrice = this.roundToTickSize(
-				isShort ? entryPriceDecimal * (1 + Math.abs(customPercentage)) : entryPriceDecimal * (1 - Math.abs(customPercentage))
-			);
+// 		if (customPercentage !== null) {
+// 			const stopLossPrice = this.roundToTickSize(
+// 				isShort ? entryPriceDecimal * (1 + Math.abs(customPercentage)) : entryPriceDecimal * (1 - Math.abs(customPercentage))
+// 			);
 
-			const priceDistance = Math.abs(stopLossPrice - entryPriceDecimal);
-			const triggerPrice = this.roundToTickSize(
-				isShort ? entryPriceDecimal + priceDistance * 0.9 : entryPriceDecimal - priceDistance * 0.9
-			);
+// 			const priceDistance = Math.abs(stopLossPrice - entryPriceDecimal);
+// 			const triggerPrice = this.roundToTickSize(
+// 				isShort ? entryPriceDecimal + priceDistance * 0.9 : entryPriceDecimal - priceDistance * 0.9
+// 			);
 
-			console.log("Price movement analysis:", {
-				direction: isShort ? "SHORT" : "LONG",
-				entryPrice: entryPriceDecimal.toFixed(4),
-				customPercentage: (customPercentage * 100).toFixed(2) + "%",
-				calculatedStopLoss: stopLossPrice.toFixed(4),
-				calculatedTrigger: triggerPrice.toFixed(4),
-			});
+// 			console.log("Price movement analysis:", {
+// 				direction: isShort ? "SHORT" : "LONG",
+// 				entryPrice: entryPriceDecimal.toFixed(4),
+// 				customPercentage: (customPercentage * 100).toFixed(2) + "%",
+// 				calculatedStopLoss: stopLossPrice.toFixed(4),
+// 				calculatedTrigger: triggerPrice.toFixed(4),
+// 			});
 
-			logger.info(`
-Direct Stop Loss Modification:
-Entry: $${entryPriceDecimal.toFixed(4)}
-New SL Price: $${stopLossPrice.toFixed(4)} (${(Math.abs(customPercentage) * 100).toFixed(1)}%)
-New Trigger: $${triggerPrice.toFixed(4)}
-`);
+// 			logger.info(`
+// Direct Stop Loss Modification:
+// Entry: $${entryPriceDecimal.toFixed(4)}
+// New SL Price: $${stopLossPrice.toFixed(4)} (${(Math.abs(customPercentage) * 100).toFixed(1)}%)
+// New Trigger: $${triggerPrice.toFixed(4)}
+// `);
 
-			return {
-				orderPrice: utils.convertDecimalToNativeInteger(stopLossPrice),
-				triggerPrice: utils.convertDecimalToNativeInteger(triggerPrice),
-			};
-		}
+// 			return {
+// 				orderPrice: utils.convertDecimalToNativeInteger(stopLossPrice),
+// 				triggerPrice: utils.convertDecimalToNativeInteger(triggerPrice),
+// 			};
+// 		}
 
-		const currentPriceDecimal = this.roundToTickSize(currentPrice);
-		const totalDistance = Math.abs(tpPriceDecimal - entryPriceDecimal);
-		const priceProgress = isShort ? entryPriceDecimal - currentPriceDecimal : currentPriceDecimal - entryPriceDecimal;
-		const progressPercentage = priceProgress / totalDistance;
+// 		const currentPriceDecimal = this.roundToTickSize(currentPrice);
+// 		const totalDistance = Math.abs(tpPriceDecimal - entryPriceDecimal);
+// 		const priceProgress = isShort ? entryPriceDecimal - currentPriceDecimal : currentPriceDecimal - entryPriceDecimal;
+// 		const progressPercentage = priceProgress / totalDistance;
 
-		console.log("Price movement analysis:", {
-			direction: isShort ? "SHORT" : "LONG",
-			entryPrice: entryPriceDecimal.toFixed(4),
-			currentPrice: currentPriceDecimal.toFixed(4),
-			tpPrice: tpPriceDecimal.toFixed(4),
-			totalDistanceToTP: totalDistance.toFixed(4),
-			currentProgressToTP: priceProgress.toFixed(4),
-			progressPercentage: (progressPercentage * 100).toFixed(2) + "%",
-			settings: {
-				progressThreshold: (this.trailingSettings.progressThreshold * 100).toFixed(2) + "%",
-				triggerPosition: (this.trailingSettings.triggerPricePosition * 100).toFixed(2) + "%",
-				orderPosition: (this.trailingSettings.orderPricePosition * 100).toFixed(2) + "%",
-			},
-		});
+// 		console.log("Price movement analysis:", {
+// 			direction: isShort ? "SHORT" : "LONG",
+// 			entryPrice: entryPriceDecimal.toFixed(4),
+// 			currentPrice: currentPriceDecimal.toFixed(4),
+// 			tpPrice: tpPriceDecimal.toFixed(4),
+// 			totalDistanceToTP: totalDistance.toFixed(4),
+// 			currentProgressToTP: priceProgress.toFixed(4),
+// 			progressPercentage: (progressPercentage * 100).toFixed(2) + "%",
+// 			settings: {
+// 				progressThreshold: (this.trailingSettings.progressThreshold * 100).toFixed(2) + "%",
+// 				triggerPosition: (this.trailingSettings.triggerPricePosition * 100).toFixed(2) + "%",
+// 				orderPosition: (this.trailingSettings.orderPricePosition * 100).toFixed(2) + "%",
+// 			},
+// 		});
 
-		if (progressPercentage >= this.trailingSettings.progressThreshold) {
-			const orderPrice = this.roundToTickSize(
-				entryPriceDecimal + (isShort ? -1 : 1) * totalDistance * this.trailingSettings.orderPricePosition
-			);
+// 		if (progressPercentage >= this.trailingSettings.progressThreshold) {
+// 			const orderPrice = this.roundToTickSize(
+// 				entryPriceDecimal + (isShort ? -1 : 1) * totalDistance * this.trailingSettings.orderPricePosition
+// 			);
 
-			const triggerPrice = this.roundToTickSize(
-				entryPriceDecimal + (isShort ? -1 : 1) * totalDistance * this.trailingSettings.triggerPricePosition
-			);
+// 			const triggerPrice = this.roundToTickSize(
+// 				entryPriceDecimal + (isShort ? -1 : 1) * totalDistance * this.trailingSettings.triggerPricePosition
+// 			);
 
-			logger.info(`
-Trailing Stop Adjustment:
-Direction: ${isShort ? "SHORT" : "LONG"}
-Entry: $${entryPriceDecimal.toFixed(4)}
-Current: $${currentPriceDecimal.toFixed(4)}
-TP Target: $${tpPriceDecimal.toFixed(4)}
-Progress: ${(progressPercentage * 100).toFixed(2)}%
-New Trigger: $${triggerPrice.toFixed(4)}
-New Order: $${orderPrice.toFixed(4)}
-        `);
+// 			logger.info(`
+// Trailing Stop Adjustment:
+// Direction: ${isShort ? "SHORT" : "LONG"}
+// Entry: $${entryPriceDecimal.toFixed(4)}
+// Current: $${currentPriceDecimal.toFixed(4)}
+// TP Target: $${tpPriceDecimal.toFixed(4)}
+// Progress: ${(progressPercentage * 100).toFixed(2)}%
+// New Trigger: $${triggerPrice.toFixed(4)}
+// New Order: $${orderPrice.toFixed(4)}
+//         `);
 
-			return {
-				orderPrice: utils.convertDecimalToNativeInteger(orderPrice),
-				triggerPrice: utils.convertDecimalToNativeInteger(triggerPrice),
-			};
-		}
+// 			return {
+// 				orderPrice: utils.convertDecimalToNativeInteger(orderPrice),
+// 				triggerPrice: utils.convertDecimalToNativeInteger(triggerPrice),
+// 			};
+// 		}
 
-		return null;
-	}
+// 		return null;
+// 	}
 
-	async verifyStopLossAdjustment(newPrices, maxAttempts = 15) {
-		const POLL_INTERVAL = 3000;
-		const oldStopLossPrice = this.positionState.orders.stopLoss.orderPrice;
+	// async verifyStopLossAdjustment(newPrices, maxAttempts = 15) {
+	// 	const POLL_INTERVAL = 3000;
+	// 	const oldStopLossPrice = this.positionState.orders.stopLoss.orderPrice;
 
-		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-			await this.client.updateState();
-			const triggerOrders = this.client.getTriggerOrders(this.positionState.marketIndex);
-			const stopLoss = triggerOrders?.find(
-				(order) => order.triggerOrderBit === this.positionState.orders.stopLoss.triggerOrderBit
-			);
+	// 	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+	// 		await this.client.updateState();
+	// 		const triggerOrders = this.client.getTriggerOrders(this.positionState.marketIndex);
+	// 		const stopLoss = triggerOrders?.find(
+	// 			(order) => order.triggerOrderBit === this.positionState.orders.stopLoss.triggerOrderBit
+	// 		);
 
-			if (stopLoss?.orderPrice !== oldStopLossPrice) {
-				logger.info(`Stop loss adjusted after ${attempt} attempt(s)`);
-				return true;
-			}
+	// 		if (stopLoss?.orderPrice !== oldStopLossPrice) {
+	// 			logger.info(`Stop loss adjusted after ${attempt} attempt(s)`);
+	// 			return true;
+	// 		}
 
-			if (attempt < maxAttempts) {
-				console.log(`Stop loss not adjusted, waiting ${POLL_INTERVAL}ms...`);
-				await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-			}
-		}
+	// 		if (attempt < maxAttempts) {
+	// 			console.log(`Stop loss not adjusted, waiting ${POLL_INTERVAL}ms...`);
+	// 			await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+	// 		}
+	// 	}
 
-		console.log(`Stop loss not adjusted after ${maxAttempts} attempts`);
-		return false;
-	}
+	// 	console.log(`Stop loss not adjusted after ${maxAttempts} attempts`);
+	// 	return false;
+	// }
 
-	stopPositionMonitoring() {
-		if (this.monitoringInterval) {
-			clearInterval(this.monitoringInterval);
-			this.monitoringInterval = null;
-			this.positionState = {
-				isMonitoring: false,
-				isAdjusting: false,
-				marketIndex: null,
-				position: null,
-				orders: {
-					takeProfit: null,
-					stopLoss: null,
-				},
-				entryPrice: null,
-				hasAdjustedStopLoss: false,
-			};
-		}
-		console.log("[MONITOR] Stopped position monitoring");
-	}
+	// stopPositionMonitoring() {
+	// 	if (this.monitoringInterval) {
+	// 		clearInterval(this.monitoringInterval);
+	// 		this.monitoringInterval = null;
+	// 		this.positionState = {
+	// 			isMonitoring: false,
+	// 			isAdjusting: false,
+	// 			marketIndex: null,
+	// 			position: null,
+	// 			orders: {
+	// 				takeProfit: null,
+	// 				stopLoss: null,
+	// 			},
+	// 			entryPrice: null,
+	// 			hasAdjustedStopLoss: false,
+	// 		};
+	// 	}
+	// 	console.log("[MONITOR] Stopped position monitoring");
+	// }
 }
