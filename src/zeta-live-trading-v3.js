@@ -6,7 +6,10 @@ import { constants, types, Network, Exchange, utils } from "@zetamarkets/sdk";
 import WebSocket from "ws";
 import dotenv from "dotenv";
 import fs from "fs";
-import { execSync } from "child_process";
+import { exec } from 'child_process';
+import { promisify } from 'util';
+const execAsync = promisify(exec);
+
 
 dotenv.config();
 
@@ -108,8 +111,11 @@ class SymbolTradingManager {
 					});
 
 					try {
-						execSync(`node src/manage-position.js open ${this.symbol} ${signalData.signal === 1 ? "long" : "short"}`);
-						this.startPositionMonitor();
+						// execSync(`node src/manage-position.js open ${this.symbol} ${signalData.signal === 1 ? "long" : "short"}`);
+						
+            await execAsync(`node src/manage-position.js open ${this.symbol} ${signalData.signal === 1 ? 'long' : 'short'}`);
+
+            this.startPositionMonitor();
 					} catch (error) {
 						logger.error(`[${this.symbol}] Failed to open position:`, error);
 					}

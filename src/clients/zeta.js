@@ -496,12 +496,11 @@ Opening ${direction} position:
 
 	fetchSettings() {
 		const settings = {
-			leverageMultiplier: 0.1,
+			leverageMultiplier: 4,
 			takeProfitPercentage: 0.036,
 			stopLossPercentage: 0.018,
 			trailingStopLoss: {
 				progressThreshold: 0.6, // Updated default
-				triggerDistance: 0.0525,
 				stopLossDistance: 0.5,
 			},
 		};

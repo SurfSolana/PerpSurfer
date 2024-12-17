@@ -338,7 +338,7 @@ Opening ${direction} position:
   async fetchSettings() {
     try {
       const settings = {
-        leverageMultiplier: 1,
+        leverageMultiplier: 4,
         takeProfitPercentage: 0.036,
         stopLossPercentage: 0.018,
         trailingStopLoss: {
