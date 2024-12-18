@@ -632,7 +632,7 @@ Opening ${direction} position:
 			types.OrderType.FILLORKILL,
 			triggerOrderBit,
 			{
-				reduceOnly: true,
+				// reduceOnly: true,
 				tag: constants.DEFAULT_ORDER_TAG,
 			}
 		);
@@ -654,7 +654,7 @@ Opening ${direction} position:
 			types.OrderType.FILLORKILL,
 			triggerOrderBit,
 			{
-				reduceOnly: true,
+				// reduceOnly: true,
 				tag: constants.DEFAULT_ORDER_TAG,
 			}
 		);

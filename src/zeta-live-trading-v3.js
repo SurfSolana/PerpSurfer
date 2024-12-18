@@ -152,6 +152,8 @@ class SymbolTradingManager {
                 `node src/manage-position.js open ${this.symbol} ${isLongSignal ? "long" : "short"}`,
                 { maxBuffer: 1024 * 1024 * 10 }
               );
+              console.log("Waiting 15s before continuing");
+              await utils.sleep(15000);        
   
               this.startPositionMonitor();
             } catch (error) {
@@ -193,8 +195,13 @@ class SymbolTradingManager {
 			const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 
 			if (!currentPosition || currentPosition.size === 0) {
+
 				this.stopMonitoring();
+
+        await this.zetaWrapper.cancelAllTriggerOrders(this.marketIndex);
+
 				return;
+        
 			}
 
       const settings = await this.zetaWrapper.fetchSettings();
@@ -287,6 +294,8 @@ class SymbolTradingManager {
 				`node src/manage-position.js close ${this.symbol} ${this.direction}`,
 				{ maxBuffer: 1024 * 1024 * 10 } // 10MB buffer
 			);
+      console.log("Waiting 15s before continuing");
+      await utils.sleep(15000);
 			this.stopMonitoring();
 		} catch (error) {
 			logger.error(`[${this.symbol}] Failed to close position:`, error);
