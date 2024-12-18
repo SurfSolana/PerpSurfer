@@ -71,7 +71,7 @@ async function openTestPosition(asset, direction) {
 }
 
 async function closeTestPosition(asset, direction) {
-	logger.info(`Closing test position: ${direction} ${asset}`);
+	logger.info(`Cancelling Trigger Orders: ${direction} ${asset}`);
 
 	// Get correct keypair path based on direction
 	const keypairPath = direction === "long" ? process.env.KEYPAIR_FILE_PATH_LONG : process.env.KEYPAIR_FILE_PATH_SHORT;
