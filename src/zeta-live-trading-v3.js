@@ -135,10 +135,10 @@ class SymbolTradingManager {
 		this.hasReachedThreshold = false;
 		this.highestProgress = 0;
 
-		await utils.sleep(250);
-
 		this.positionMonitorInterval = setInterval(() => this.monitorPosition(), POSITION_SETTINGS.monitorInterval);
 		logger.info(`[${this.symbol}] Started position monitoring`);
+
+    await utils.sleep(500);
 	}
 
 	async monitorPosition() {
@@ -152,31 +152,45 @@ class SymbolTradingManager {
 				return;
 			}
 
-			const isShort = currentPosition.size < 0;
-			const triggerOrders = await this.zetaWrapper.getTriggerOrders(this.marketIndex);
+      const settings = await this.zetaWrapper.fetchSettings();
 
-			const stopLoss = triggerOrders.find((order) =>
-				isShort
-					? order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
-					: order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
-			);
-			const takeProfit = triggerOrders.find((order) =>
-				isShort
-					? order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
-					: order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
-			);
+      const direction = currentPosition.size > 0 ? "long" : "short";
+
+      // const isShort = direction === "short" ? true : false;
 
 			const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
+
 			const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
-			const takeProfitPrice = takeProfit.orderPrice / 1e6;
-			const stopLossPrice = stopLoss.orderPrice / 1e6;
+
+      // console.log({
+      //   direction,
+      //   entryPrice,
+      //   settings,
+      //   costOfTrades: currentPosition.costOfTrades,
+      //   size: currentPosition.size
+      // });
+
+      const { takeProfitPrice, stopLossPrice } = this.zetaWrapper.calculateTPSLPrices(direction, entryPrice, settings);
+
+      // console.log("TPP:", takeProfitPrice);
+      // console.log("SLP:", stopLossPrice);
 
 			const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
-			const currentProgress = isShort ? entryPrice - currentPrice : currentPrice - entryPrice;
-			const progressPercent = currentProgress / totalDistanceToTP;
+
+      // Get Current Progress
+			// const currentProgress = isShort ? entryPrice - currentPrice : currentPrice - entryPrice;
+      // -------
+			// Updated:
+      // Removed isShort and reversed the function order for clarity
+      const currentProgress = direction === "long" ? currentPrice - entryPrice : entryPrice - currentPrice;
+      
+      const progressPercent = currentProgress / totalDistanceToTP;
 
 			// Check original stop loss
-			const originalStopLossHit = isShort ? currentPrice >= stopLossPrice : currentPrice <= stopLossPrice;
+			// const originalStopLossHit = isShort ? currentPrice >= stopLossPrice : currentPrice <= stopLossPrice;
+      // -------
+			// Updated:
+      const originalStopLossHit = direction === "long" ? currentPrice <= stopLossPrice : currentPrice >= stopLossPrice;
 
 			if (originalStopLossHit) {
 				logger.info(`[${this.symbol}] Stop loss hit, closing position`);
@@ -187,7 +201,7 @@ class SymbolTradingManager {
 			// Log progress if price changed
 			if (this.lastCheckedPrice !== currentPrice) {
 				console.log(`[${this.symbol}] Position progress:`, {
-					direction: isShort ? "SHORT" : "LONG",
+					direction: direction === "long" ? "LONG" : "SHORT", // removed isShort and reversed for clarity
 					entryPrice: entryPrice.toFixed(4),
 					currentPrice: currentPrice.toFixed(4),
 					stopLossPrice: stopLossPrice.toFixed(4),
@@ -197,12 +211,11 @@ class SymbolTradingManager {
 					highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
 				});
 				this.lastCheckedPrice = currentPrice;
+        this.highestProgress = Math.max(this.highestProgress, progressPercent);
 			}
 
-			// Track progress after threshold
 			if (progressPercent >= POSITION_SETTINGS.progressThreshold) {
 				this.hasReachedThreshold = true;
-				this.highestProgress = Math.max(this.highestProgress, progressPercent);
 			}
 
 			// Check for pullback closure after reaching threshold

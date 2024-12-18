@@ -371,20 +371,20 @@ Opening ${direction} position:
 
     const stopLossTrigger = this.roundToTickSize(isLong ? price - (price - stopLossPrice) * 0.95 : price + (stopLossPrice - price) * 0.95);
 
-    console.log("Calculated TP/SL Prices:", {
-      direction,
-      entryPrice: price.toFixed(4),
-      takeProfit: {
-        price: takeProfitPrice.toFixed(4),
-        trigger: takeProfitTrigger.toFixed(4),
-        percentage: (takeProfitPercentage * 100).toFixed(2) + "%",
-      },
-      stopLoss: {
-        price: stopLossPrice.toFixed(4),
-        trigger: stopLossTrigger.toFixed(4),
-        percentage: (stopLossPercentage * 100).toFixed(2) + "%",
-      },
-    });
+    // console.log("Calculated TP/SL Prices:", {
+    //   direction,
+    //   entryPrice: price.toFixed(4),
+    //   takeProfit: {
+    //     price: takeProfitPrice.toFixed(4),
+    //     trigger: takeProfitTrigger.toFixed(4),
+    //     percentage: (takeProfitPercentage * 100).toFixed(2) + "%",
+    //   },
+    //   stopLoss: {
+    //     price: stopLossPrice.toFixed(4),
+    //     trigger: stopLossTrigger.toFixed(4),
+    //     percentage: (stopLossPercentage * 100).toFixed(2) + "%",
+    //   },
+    // });
 
     return {
       takeProfitPrice,
