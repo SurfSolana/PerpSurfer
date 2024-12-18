@@ -224,7 +224,7 @@ class SymbolTradingManager {
 	async closePosition() {
 		this.isAdjusting = true;
 		try {
-			execSync(`node src/manage-position.js close ${this.symbol} ${this.direction}`);
+			await execAsync(`node src/manage-position.js close ${this.symbol} ${this.direction}`);
 			this.stopMonitoring();
 		} catch (error) {
 			logger.error(`[${this.symbol}] Failed to close position:`, error);
