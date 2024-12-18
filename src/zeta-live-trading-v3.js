@@ -6,10 +6,9 @@ import { constants, types, Network, Exchange, utils } from "@zetamarkets/sdk";
 import WebSocket from "ws";
 import dotenv from "dotenv";
 import fs from "fs";
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { exec } from "child_process";
+import { promisify } from "util";
 const execAsync = promisify(exec);
-
 
 dotenv.config();
 
@@ -111,11 +110,13 @@ class SymbolTradingManager {
 					});
 
 					try {
-						// execSync(`node src/manage-position.js open ${this.symbol} ${signalData.signal === 1 ? "long" : "short"}`);
-						
-            await execAsync(`node src/manage-position.js open ${this.symbol} ${signalData.signal === 1 ? 'long' : 'short'}`);
 
-            this.startPositionMonitor();
+						await execAsync(
+              `node src/manage-position.js open ${this.symbol} ${signalData.signal === 1 ? "long" : "short"}`,
+              { maxBuffer: 1024 * 1024 * 10 } // 10MB buffer
+            );
+
+						this.startPositionMonitor();
 					} catch (error) {
 						logger.error(`[${this.symbol}] Failed to open position:`, error);
 					}
@@ -134,7 +135,7 @@ class SymbolTradingManager {
 		this.hasReachedThreshold = false;
 		this.highestProgress = 0;
 
-    await utils.sleep(250);
+		await utils.sleep(250);
 
 		this.positionMonitorInterval = setInterval(() => this.monitorPosition(), POSITION_SETTINGS.monitorInterval);
 		logger.info(`[${this.symbol}] Started position monitoring`);
@@ -224,7 +225,10 @@ class SymbolTradingManager {
 	async closePosition() {
 		this.isAdjusting = true;
 		try {
-			await execAsync(`node src/manage-position.js close ${this.symbol} ${this.direction}`);
+			await execAsync(
+				`node src/manage-position.js close ${this.symbol} ${this.direction}`,
+				{ maxBuffer: 1024 * 1024 * 10 } // 10MB buffer
+			);
 			this.stopMonitoring();
 		} catch (error) {
 			logger.error(`[${this.symbol}] Failed to close position:`, error);
