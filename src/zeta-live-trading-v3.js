@@ -8,6 +8,8 @@ import dotenv from "dotenv";
 import fs from "fs";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { getMarketSentiment } from './utils/market-sentiment.js';
+
 const execAsync = promisify(exec);
 
 dotenv.config();
@@ -99,33 +101,76 @@ class SymbolTradingManager {
 		this.highestProgress = 0;
 	}
 
-	async processSignal(signalData) {
-		try {
-			const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+	// async processSignal(signalData) {
+	// 	try {
+	// 		const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 
-			if (!currentPosition || currentPosition.size === 0) {
-				if (signalData.signal !== 0) {
-					logger.info(`[${this.symbol}] Opening position based on signal`, {
-						direction: signalData.signal === 1 ? "long" : "short",
-					});
+	// 		if (!currentPosition || currentPosition.size === 0) {
+	// 			if (signalData.signal !== 0) {
+	// 				logger.info(`[${this.symbol}] Opening position based on signal`, {
+	// 					direction: signalData.signal === 1 ? "long" : "short",
+	// 				});
 
-					try {
+	// 				try {
 
-						await execAsync(
-              `node src/manage-position.js open ${this.symbol} ${signalData.signal === 1 ? "long" : "short"}`,
-              { maxBuffer: 1024 * 1024 * 10 } // 10MB buffer
-            );
+	// 					await execAsync(
+  //             `node src/manage-position.js open ${this.symbol} ${signalData.signal === 1 ? "long" : "short"}`,
+  //             { maxBuffer: 1024 * 1024 * 10 } // 10MB buffer
+  //           );
 
-						this.startPositionMonitor();
-					} catch (error) {
-						logger.error(`[${this.symbol}] Failed to open position:`, error);
-					}
-				}
-			}
-		} catch (error) {
-			logger.error(`[${this.symbol}] Error processing signal:`, error);
-		}
-	}
+	// 					this.startPositionMonitor();
+	// 				} catch (error) {
+	// 					logger.error(`[${this.symbol}] Failed to open position:`, error);
+	// 				}
+	// 			}
+	// 		}
+	// 	} catch (error) {
+	// 		logger.error(`[${this.symbol}] Error processing signal:`, error);
+	// 	}
+	// }
+
+  async processSignal(signalData) {
+    try {
+      const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+      
+      if (!currentPosition || currentPosition.size === 0) {
+        if (signalData.signal !== 0) {
+          const marketConditions = await getMarketSentiment();
+          const isLongSignal = signalData.signal === 1;
+          
+          if ((isLongSignal && marketConditions.canOpenLong) || 
+              (!isLongSignal && marketConditions.canOpenShort)) {
+            
+            logger.info(`[${this.symbol}] Opening position based on signal and market sentiment`, {
+              direction: isLongSignal ? "long" : "short",
+              marketSentiment: marketConditions.sentiment,
+              sentimentIndex: marketConditions.index
+            });
+  
+            try {
+              await execAsync(
+                `node src/manage-position.js open ${this.symbol} ${isLongSignal ? "long" : "short"}`,
+                { maxBuffer: 1024 * 1024 * 10 }
+              );
+  
+              this.startPositionMonitor();
+            } catch (error) {
+              logger.error(`[${this.symbol}] Failed to open position:`, error);
+            }
+          } else {
+            logger.info(`[${this.symbol}] Skipping position due to market sentiment`, {
+              attemptedDirection: isLongSignal ? "long" : "short",
+              marketSentiment: marketConditions.sentiment,
+              sentimentIndex: marketConditions.index
+            });
+          }
+        }
+      }
+    } catch (error) {
+      logger.error(`[${this.symbol}] Error processing signal:`, error);
+    }
+  }
+  
 
 	async startPositionMonitor() {
 		if (this.positionMonitorInterval) {
