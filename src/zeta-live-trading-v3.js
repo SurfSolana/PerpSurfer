@@ -101,34 +101,6 @@ class SymbolTradingManager {
 		this.highestProgress = 0;
 	}
 
-	// async processSignal(signalData) {
-	// 	try {
-	// 		const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
-
-	// 		if (!currentPosition || currentPosition.size === 0) {
-	// 			if (signalData.signal !== 0) {
-	// 				logger.info(`[${this.symbol}] Opening position based on signal`, {
-	// 					direction: signalData.signal === 1 ? "long" : "short",
-	// 				});
-
-	// 				try {
-
-	// 					await execAsync(
-  //             `node src/manage-position.js open ${this.symbol} ${signalData.signal === 1 ? "long" : "short"}`,
-  //             { maxBuffer: 1024 * 1024 * 10 } // 10MB buffer
-  //           );
-
-	// 					this.startPositionMonitor();
-	// 				} catch (error) {
-	// 					logger.error(`[${this.symbol}] Failed to open position:`, error);
-	// 				}
-	// 			}
-	// 		}
-	// 	} catch (error) {
-	// 		logger.error(`[${this.symbol}] Error processing signal:`, error);
-	// 	}
-	// }
-
   async processSignal(signalData) {
     try {
       const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
@@ -195,13 +167,18 @@ class SymbolTradingManager {
 			const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 
 			if (!currentPosition || currentPosition.size === 0) {
-
 				this.stopMonitoring();
 
-        await this.zetaWrapper.cancelAllTriggerOrders(this.marketIndex);
+        await execAsync(
+          `node src/cancel-position.js cancel ${this.symbol} ${this.direction}`,
+          { maxBuffer: 1024 * 1024 * 10 } // 10MB buffer
+        );
+        console.log("Waiting 15s before continuing");
+        await utils.sleep(15000);
+  
 
 				return;
-        
+
 			}
 
       const settings = await this.zetaWrapper.fetchSettings();
