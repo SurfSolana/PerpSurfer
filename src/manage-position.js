@@ -34,7 +34,7 @@ async function validateAndInitialize(markets) {
 			preflightCommitment: "finalized",
 			commitment: "finalized",
 		},
-		25,
+		200,
 		// false,
 		// connection,
 		// marketsArray,
@@ -62,7 +62,13 @@ async function openTestPosition(asset, direction) {
   await zetaWrapper.initializeExchange([constants.Asset[asset]]);
 	await zetaWrapper.initialize(keypairPath);
 
-	await zetaWrapper.cancelAllTriggerOrders(constants.Asset[asset]);
+	// await zetaWrapper.cancelAllTriggerOrders(constants.Asset[asset]);
+
+  try {
+    const tx_cancel = await zetaWrapper.cancelAllTriggerOrders(constants.Asset[asset]);
+  } catch(error) {
+    console.error("Failed to cancel trigger orders.", tx_cancel);
+  }
 
 	// Open position
 	const tx = await zetaWrapper.openPosition(direction, constants.Asset[asset]);
@@ -86,8 +92,11 @@ async function closeTestPosition(asset, direction) {
 	// close position
 	const tx_close = await zetaWrapper.closePosition(direction, constants.Asset[asset]);
 
-  // cancel all trigger orders
-	const tx_cancel = await zetaWrapper.cancelAllTriggerOrders(constants.Asset[asset]);
+  try {
+    const tx_cancel = await zetaWrapper.cancelAllTriggerOrders(constants.Asset[asset]);
+  } catch(error) {
+    console.error("Failed to cancel trigger orders.", tx_cancel);
+  }
 
 	process.exit(0);
 }

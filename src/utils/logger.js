@@ -37,7 +37,7 @@ const logger = winston.createLogger({
 	],
 });
 
-// Helper functions
+// Helper functions remain unchanged...
 function getEmojiForLogLevel(level) {
 	switch (level) {
 		case "error":
@@ -171,8 +171,8 @@ function log(level, message, metadata = {}) {
 
 	logger.log(level, message, metadata);
 
-	// Only accumulate messages for Telegram if it's configured
-	if (isTelegramConfigured && level !== "debug" && level !== "silly") {
+	// Only accumulate messages for Telegram if it's configured and not error/debug/silly level
+	if (isTelegramConfigured && !['error', 'debug', 'silly'].includes(level)) {
 		const formattedMetadata = formatMetadata(metadata);
 		const telegramMessage = `${message}${formattedMetadata}`;
 
@@ -192,7 +192,7 @@ function log(level, message, metadata = {}) {
 	}
 }
 
-// Utility functions remain the same but now respect Telegram configuration
+// All utility functions remain unchanged...
 function logPerformance(action, duration) {
 	log("info", `Performance: ${action} completed in ${duration.toFixed(2)}ms`);
 	console.log(`Detailed timing - ${action}: ${duration.toFixed(2)}ms`);
