@@ -99,21 +99,18 @@ class SymbolTradingManager {
 		// this.hasReachedThreshold = false;
 		// this.highestProgress = 0;
 
-    // Core trading properties
     this.marketIndex = marketIndex;
     this.direction = direction;
     this.symbol = constants.Asset[marketIndex];
     this.zetaWrapper = zetaWrapper;
     
-    // Monitoring state
     this.positionMonitorInterval = null;
     this.lastCheckedPrice = null;
     
-    // Progress tracking properties
+    // Progress tracking properties remain the same
     this.hasReachedThreshold = false;    // Tracks if we've hit 30% progress
-    this.highestProgress = 0;            // Tracks highest progress percentage reached
-    this.thresholdHits = 0;              // Counts consecutive hits at close threshold
-
+    this.highestProgress = 0;            // Can now go beyond 1.0 (100%)
+    this.thresholdHits = 0;              // Counts consecutive hits at close threshold    
 	}
 
 	async processSignal(signalData) {
@@ -271,9 +268,9 @@ class SymbolTradingManager {
 	// 	}
 	// }
 
+
   async monitorPosition() {
     try {
-      // Get current position details
       const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 
       if (!currentPosition || currentPosition.size === 0) {
@@ -284,26 +281,25 @@ class SymbolTradingManager {
         return;
       }
 
-      // Calculate position metrics
       const settings = await this.zetaWrapper.fetchSettings();
       const direction = currentPosition.size > 0 ? "long" : "short";
       const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
       const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
       const { takeProfitPrice, stopLossPrice } = this.zetaWrapper.calculateTPSLPrices(direction, entryPrice, settings);
 
-      // Calculate progress as a percentage of the total distance to take profit
+      // Calculate progress - now allowed to exceed 100%
       const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
       const currentProgress = direction === "long" ? currentPrice - entryPrice : entryPrice - currentPrice;
-      const progressPercent = currentProgress / totalDistanceToTP;
+      const progressPercent = currentProgress / totalDistanceToTP;  // Can now exceed 1.0
 
-      // Update highest progress reached if we've exceeded previous high
+      // Update highest progress - no upper limit
       this.highestProgress = Math.max(this.highestProgress, progressPercent);
 
-      // Calculate dynamic pullback threshold based on highest progress
-      // It's (highest progress - 20%), ensuring we lock in more profit as price moves up
+      // Dynamic pullback threshold still works the same way
+      // As price goes higher (even beyond 100%), pullback threshold increases
       const dynamicPullbackThreshold = Math.max(0, this.highestProgress - 0.20);
 
-      // Check for stop loss
+      // Stop loss check remains the same
       const originalStopLossHit = direction === "long" ? currentPrice <= stopLossPrice : currentPrice >= stopLossPrice;
       if (originalStopLossHit) {
         logger.info(`[${this.symbol}] Stop loss hit, closing position`);
@@ -311,7 +307,7 @@ class SymbolTradingManager {
         return;
       }
 
-      // Log position updates when price changes
+      // Enhanced logging to better show progress beyond 100%
       if (this.lastCheckedPrice !== currentPrice) {
         console.log(`[${this.symbol}] Position progress:`, {
           direction: direction === "long" ? "LONG" : "SHORT",
@@ -323,42 +319,44 @@ class SymbolTradingManager {
           hasReachedThreshold: this.hasReachedThreshold,
           highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
           pullbackThreshold: (dynamicPullbackThreshold * 100).toFixed(2) + "%",
-          thresholdHits: this.thresholdHits
+          thresholdHits: this.thresholdHits,
+          beyondTakeProfit: progressPercent > 1.0 ? `${((progressPercent - 1.0) * 100).toFixed(2)}% beyond TP` : 'No'
         });
         this.lastCheckedPrice = currentPrice;
       }
 
-      // Check if we've reached initial 30% threshold
-      if (progressPercent >= 0.30) {  // Changed from 0.60 to 0.30
+      // Initial threshold check remains at 30%
+      if (progressPercent >= 0.30) {
         this.hasReachedThreshold = true;
       }
 
-      // Position close logic with consecutive hit requirement
+      // Position close logic now only checks pullback threshold
       if (this.hasReachedThreshold) {
-        // Close conditions: hit take profit or drop below dynamic pullback threshold
-        if (progressPercent <= dynamicPullbackThreshold || progressPercent >= 1.0) {
+        // Only close if we drop below dynamic pullback threshold
+        if (progressPercent <= dynamicPullbackThreshold) {
           this.thresholdHits++;
           
           logger.info(`[${this.symbol}] Threshold hit detected:`, {
             hits: this.thresholdHits,
             currentProgress: (progressPercent * 100).toFixed(2) + "%",
             highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
-            pullbackThreshold: (dynamicPullbackThreshold * 100).toFixed(2) + "%"
+            pullbackThreshold: (dynamicPullbackThreshold * 100).toFixed(2) + "%",
+            beyondTakeProfit: progressPercent > 1.0 ? `${((progressPercent - 1.0) * 100).toFixed(2)}% beyond TP` : 'No'
           });
 
           if (this.thresholdHits >= 2) {
             logger.info(`[${this.symbol}] Closing position:`, {
-              reason: progressPercent >= 1.0 ? "Take profit reached" : "Dynamic pullback threshold hit",
+              reason: "Dynamic pullback threshold hit",
               hits: this.thresholdHits,
               currentProgress: (progressPercent * 100).toFixed(2) + "%",
               highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
-              pullbackThreshold: (dynamicPullbackThreshold * 100).toFixed(2) + "%"
+              pullbackThreshold: (dynamicPullbackThreshold * 100).toFixed(2) + "%",
+              beyondTakeProfit: progressPercent > 1.0 ? `${((progressPercent - 1.0) * 100).toFixed(2)}% beyond TP` : 'No'
             });
             await this.closePosition();
             return;
           }
         } else {
-          // Reset hit counter if we're not at a closing threshold
           this.thresholdHits = 0;
         }
       }
@@ -393,6 +391,7 @@ class SymbolTradingManager {
       logger.error(`[${this.symbol}] Failed to close position:`, error);
     }
   }
+
 
 	// stopMonitoring() {
 	// 	if (this.positionMonitorInterval) {
