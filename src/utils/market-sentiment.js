@@ -56,7 +56,7 @@ const getMarketSentiment = async () => {
       }
     });
 
-    const percentChanges = response.data.data.map(coin => coin.quote.USD.percent_change_1h);
+    const percentChanges = response.data.data.map(coin => coin.quote.USD.percent_change_24h);
     const index = calculateIndex(percentChanges);
     const sentiment = getSentiment(index);
 
