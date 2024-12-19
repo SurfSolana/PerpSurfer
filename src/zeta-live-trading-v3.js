@@ -275,7 +275,7 @@ class SymbolTradingManager {
 
       if (!currentPosition || currentPosition.size === 0) {
         this.stopMonitoring();
-        await execAsync(`node src/cancel-position.js cancel ${this.symbol} ${this.direction}`, { maxBuffer: 1024 * 1024 * 10 });
+        await execAsync(`node src/cancel-trigger-orders.js cancel ${this.symbol} ${this.direction}`, { maxBuffer: 1024 * 1024 * 10 });
         console.log("Waiting 15s before continuing");
         await utils.sleep(15000);
         return;
