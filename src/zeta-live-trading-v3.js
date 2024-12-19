@@ -8,7 +8,7 @@ import dotenv from "dotenv";
 import fs from "fs";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { getMarketSentiment } from './utils/market-sentiment.js';
+import { getMarketSentiment } from "./utils/market-sentiment.js";
 
 const execAsync = promisify(exec);
 
@@ -90,61 +90,72 @@ async function initializeExchange(markets) {
 
 class SymbolTradingManager {
 	constructor(marketIndex, direction, zetaWrapper) {
-		this.marketIndex = marketIndex;
-		this.direction = direction;
-		this.symbol = constants.Asset[marketIndex];
-		this.zetaWrapper = zetaWrapper;
-		this.positionMonitorInterval = null;
-		this.lastCheckedPrice = null;
-		this.isAdjusting = false;
-		this.hasReachedThreshold = false;
-		this.highestProgress = 0;
+		// this.marketIndex = marketIndex;
+		// this.direction = direction;
+		// this.symbol = constants.Asset[marketIndex];
+		// this.zetaWrapper = zetaWrapper;
+		// this.positionMonitorInterval = null;
+		// this.lastCheckedPrice = null;
+		// this.hasReachedThreshold = false;
+		// this.highestProgress = 0;
+
+    // Core trading properties
+    this.marketIndex = marketIndex;
+    this.direction = direction;
+    this.symbol = constants.Asset[marketIndex];
+    this.zetaWrapper = zetaWrapper;
+    
+    // Monitoring state
+    this.positionMonitorInterval = null;
+    this.lastCheckedPrice = null;
+    
+    // Progress tracking properties
+    this.hasReachedThreshold = false;    // Tracks if we've hit 30% progress
+    this.highestProgress = 0;            // Tracks highest progress percentage reached
+    this.thresholdHits = 0;              // Counts consecutive hits at close threshold
+
 	}
 
-  async processSignal(signalData) {
-    try {
-      const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
-      
-      if (!currentPosition || currentPosition.size === 0) {
-        if (signalData.signal !== 0) {
-          const marketConditions = await getMarketSentiment();
-          const isLongSignal = signalData.signal === 1;
-          
-          if ((isLongSignal && marketConditions.canOpenLong) || 
-              (!isLongSignal && marketConditions.canOpenShort)) {
-            
-            logger.info(`[${this.symbol}] Opening position based on signal and market sentiment`, {
-              direction: isLongSignal ? "long" : "short",
-              marketSentiment: marketConditions.sentiment,
-              sentimentIndex: marketConditions.index
-            });
-  
-            try {
-              await execAsync(
-                `node src/manage-position.js open ${this.symbol} ${isLongSignal ? "long" : "short"}`,
-                { maxBuffer: 1024 * 1024 * 10 }
-              );
-              console.log("Waiting 15s before continuing");
-              await utils.sleep(15000);
-  
-              // this.startPositionMonitor();
-            } catch (error) {
-              logger.error(`[${this.symbol}] Failed to open position:`, error);
-            }
-          } else {
-            logger.info(`[${this.symbol}] Skipping position due to market sentiment`, {
-              attemptedDirection: isLongSignal ? "long" : "short",
-              marketSentiment: marketConditions.sentiment,
-              sentimentIndex: marketConditions.index
-            });
-          }
-        }
-      }
-    } catch (error) {
-      logger.error(`[${this.symbol}] Error processing signal:`, error);
-    }
-  }
-  
+	async processSignal(signalData) {
+		try {
+			const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+
+			if (!currentPosition || currentPosition.size === 0) {
+				if (signalData.signal !== 0) {
+					const marketConditions = await getMarketSentiment();
+					const isLongSignal = signalData.signal === 1;
+
+					if ((isLongSignal && marketConditions.canOpenLong) || (!isLongSignal && marketConditions.canOpenShort)) {
+						logger.info(`[${this.symbol}] Opening position based on signal and market sentiment`, {
+							direction: isLongSignal ? "long" : "short",
+							marketSentiment: marketConditions.sentiment,
+							sentimentIndex: marketConditions.index,
+						});
+
+						try {
+							await execAsync(`node src/manage-position.js open ${this.symbol} ${isLongSignal ? "long" : "short"}`, {
+								maxBuffer: 1024 * 1024 * 10,
+							});
+							console.log("Waiting 15s before continuing");
+							await utils.sleep(15000);
+
+							// this.startPositionMonitor();
+						} catch (error) {
+							logger.error(`[${this.symbol}] Failed to open position:`, error);
+						}
+					} else {
+						logger.info(`[${this.symbol}] Skipping position due to market sentiment`, {
+							attemptedDirection: isLongSignal ? "long" : "short",
+							marketSentiment: marketConditions.sentiment,
+							sentimentIndex: marketConditions.index,
+						});
+					}
+				}
+			}
+		} catch (error) {
+			logger.error(`[${this.symbol}] Error processing signal:`, error);
+		}
+	}
 
 	async startPositionMonitor() {
 		if (this.positionMonitorInterval) {
@@ -157,138 +168,252 @@ class SymbolTradingManager {
 		this.positionMonitorInterval = setInterval(() => this.monitorPosition(), POSITION_SETTINGS.monitorInterval);
 		logger.info(`[${this.symbol}] Started position monitoring`);
 
-    await utils.sleep(500);
+		await utils.sleep(500);
 	}
 
-	async monitorPosition() {
-		if (this.isAdjusting) return;
+	// async monitorPosition() {
+	// 	try {
+	// 		const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 
-		try {
-			const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+	// 		if (!currentPosition || currentPosition.size === 0) {
+	// 			this.stopMonitoring();
 
-			if (!currentPosition || currentPosition.size === 0) {
-				this.stopMonitoring();
+	// 			await execAsync(
+	// 				`node src/cancel-position.js cancel ${this.symbol} ${this.direction}`,
+	// 				{ maxBuffer: 1024 * 1024 * 10 } // 10MB buffer
+	// 			);
+	// 			console.log("Waiting 15s before continuing");
+	// 			await utils.sleep(15000);
 
-        await execAsync(
-          `node src/cancel-position.js cancel ${this.symbol} ${this.direction}`,
-          { maxBuffer: 1024 * 1024 * 10 } // 10MB buffer
-        );
+	// 			return;
+	// 		}
+
+	// 		const settings = await this.zetaWrapper.fetchSettings();
+
+	// 		const direction = currentPosition.size > 0 ? "long" : "short";
+
+	// 		// const isShort = direction === "short" ? true : false;
+
+	// 		const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
+
+	// 		const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
+
+	// 		// console.log({
+	// 		//   direction,
+	// 		//   entryPrice,
+	// 		//   settings,
+	// 		//   costOfTrades: currentPosition.costOfTrades,
+	// 		//   size: currentPosition.size
+	// 		// });
+
+	// 		const { takeProfitPrice, stopLossPrice } = this.zetaWrapper.calculateTPSLPrices(direction, entryPrice, settings);
+
+	// 		// console.log("TPP:", takeProfitPrice);
+	// 		// console.log("SLP:", stopLossPrice);
+
+	// 		const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
+
+	// 		// Get Current Progress
+	// 		// const currentProgress = isShort ? entryPrice - currentPrice : currentPrice - entryPrice;
+	// 		// -------
+	// 		// Updated:
+	// 		// Removed isShort and reversed the function order for clarity
+	// 		const currentProgress = direction === "long" ? currentPrice - entryPrice : entryPrice - currentPrice;
+
+	// 		const progressPercent = currentProgress / totalDistanceToTP;
+
+	// 		// Check original stop loss
+	// 		// const originalStopLossHit = isShort ? currentPrice >= stopLossPrice : currentPrice <= stopLossPrice;
+	// 		// -------
+	// 		// Updated:
+	// 		const originalStopLossHit = direction === "long" ? currentPrice <= stopLossPrice : currentPrice >= stopLossPrice;
+
+	// 		if (originalStopLossHit) {
+	// 			logger.info(`[${this.symbol}] Stop loss hit, closing position`);
+	// 			await this.closePosition();
+	// 			return;
+	// 		}
+
+	// 		// Log progress if price changed
+	// 		if (this.lastCheckedPrice !== currentPrice) {
+	// 			console.log(`[${this.symbol}] Position progress:`, {
+	// 				direction: direction === "long" ? "LONG" : "SHORT", // removed isShort and reversed for clarity
+	// 				entryPrice: entryPrice.toFixed(4),
+	// 				currentPrice: currentPrice.toFixed(4),
+	// 				stopLossPrice: stopLossPrice.toFixed(4),
+	// 				takeProfitPrice: takeProfitPrice.toFixed(4),
+	// 				progress: (progressPercent * 100).toFixed(2) + "%",
+	// 				hasReachedThreshold: this.hasReachedThreshold,
+	// 				highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
+	// 			});
+	// 			this.lastCheckedPrice = currentPrice;
+	// 			this.highestProgress = Math.max(this.highestProgress, progressPercent);
+	// 		}
+
+	// 		if (progressPercent >= POSITION_SETTINGS.progressThreshold) {
+	// 			this.hasReachedThreshold = true;
+	// 		}
+
+	// 		// Check for pullback closure after reaching threshold
+	// 		if (this.hasReachedThreshold) {
+	// 			if (progressPercent <= POSITION_SETTINGS.pullbackThreshold || progressPercent >= 1.0) {
+	// 				logger.info(`[${this.symbol}] Closing position:`, {
+	// 					reason: progressPercent >= 1.0 ? "Take profit reached" : "Pullback threshold hit",
+	// 					currentProgress: (progressPercent * 100).toFixed(2) + "%",
+	// 					highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
+	// 				});
+	// 				await this.closePosition();
+	// 				return;
+	// 			}
+	// 		}
+	// 	} catch (error) {
+	// 		logger.error(`[${this.symbol}] Error in position monitoring:`, error);
+	// 	}
+	// }
+
+  async monitorPosition() {
+    try {
+      // Get current position details
+      const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+
+      if (!currentPosition || currentPosition.size === 0) {
+        this.stopMonitoring();
+        await execAsync(`node src/cancel-position.js cancel ${this.symbol} ${this.direction}`, { maxBuffer: 1024 * 1024 * 10 });
         console.log("Waiting 15s before continuing");
         await utils.sleep(15000);
-  
-				return;
+        return;
+      }
 
-			}
-
+      // Calculate position metrics
       const settings = await this.zetaWrapper.fetchSettings();
-
       const direction = currentPosition.size > 0 ? "long" : "short";
-
-      // const isShort = direction === "short" ? true : false;
-
-			const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
-
-			const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
-
-      // console.log({
-      //   direction,
-      //   entryPrice,
-      //   settings,
-      //   costOfTrades: currentPosition.costOfTrades,
-      //   size: currentPosition.size
-      // });
-
+      const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
+      const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
       const { takeProfitPrice, stopLossPrice } = this.zetaWrapper.calculateTPSLPrices(direction, entryPrice, settings);
 
-      // console.log("TPP:", takeProfitPrice);
-      // console.log("SLP:", stopLossPrice);
-
-			const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
-
-      // Get Current Progress
-			// const currentProgress = isShort ? entryPrice - currentPrice : currentPrice - entryPrice;
-      // -------
-			// Updated:
-      // Removed isShort and reversed the function order for clarity
+      // Calculate progress as a percentage of the total distance to take profit
+      const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
       const currentProgress = direction === "long" ? currentPrice - entryPrice : entryPrice - currentPrice;
-      
       const progressPercent = currentProgress / totalDistanceToTP;
 
-			// Check original stop loss
-			// const originalStopLossHit = isShort ? currentPrice >= stopLossPrice : currentPrice <= stopLossPrice;
-      // -------
-			// Updated:
+      // Update highest progress reached if we've exceeded previous high
+      this.highestProgress = Math.max(this.highestProgress, progressPercent);
+
+      // Calculate dynamic pullback threshold based on highest progress
+      // It's (highest progress - 20%), ensuring we lock in more profit as price moves up
+      const dynamicPullbackThreshold = Math.max(0, this.highestProgress - 0.20);
+
+      // Check for stop loss
       const originalStopLossHit = direction === "long" ? currentPrice <= stopLossPrice : currentPrice >= stopLossPrice;
+      if (originalStopLossHit) {
+        logger.info(`[${this.symbol}] Stop loss hit, closing position`);
+        await this.closePosition();
+        return;
+      }
 
-			if (originalStopLossHit) {
-				logger.info(`[${this.symbol}] Stop loss hit, closing position`);
-				await this.closePosition();
-				return;
-			}
+      // Log position updates when price changes
+      if (this.lastCheckedPrice !== currentPrice) {
+        console.log(`[${this.symbol}] Position progress:`, {
+          direction: direction === "long" ? "LONG" : "SHORT",
+          entryPrice: entryPrice.toFixed(4),
+          currentPrice: currentPrice.toFixed(4),
+          stopLossPrice: stopLossPrice.toFixed(4),
+          takeProfitPrice: takeProfitPrice.toFixed(4),
+          progress: (progressPercent * 100).toFixed(2) + "%",
+          hasReachedThreshold: this.hasReachedThreshold,
+          highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
+          pullbackThreshold: (dynamicPullbackThreshold * 100).toFixed(2) + "%",
+          thresholdHits: this.thresholdHits
+        });
+        this.lastCheckedPrice = currentPrice;
+      }
 
-			// Log progress if price changed
-			if (this.lastCheckedPrice !== currentPrice) {
-				console.log(`[${this.symbol}] Position progress:`, {
-					direction: direction === "long" ? "LONG" : "SHORT", // removed isShort and reversed for clarity
-					entryPrice: entryPrice.toFixed(4),
-					currentPrice: currentPrice.toFixed(4),
-					stopLossPrice: stopLossPrice.toFixed(4),
-					takeProfitPrice: takeProfitPrice.toFixed(4),
-					progress: (progressPercent * 100).toFixed(2) + "%",
-					hasReachedThreshold: this.hasReachedThreshold,
-					highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
-				});
-				this.lastCheckedPrice = currentPrice;
-        this.highestProgress = Math.max(this.highestProgress, progressPercent);
-			}
+      // Check if we've reached initial 30% threshold
+      if (progressPercent >= 0.30) {  // Changed from 0.60 to 0.30
+        this.hasReachedThreshold = true;
+      }
 
-			if (progressPercent >= POSITION_SETTINGS.progressThreshold) {
-				this.hasReachedThreshold = true;
-			}
+      // Position close logic with consecutive hit requirement
+      if (this.hasReachedThreshold) {
+        // Close conditions: hit take profit or drop below dynamic pullback threshold
+        if (progressPercent <= dynamicPullbackThreshold || progressPercent >= 1.0) {
+          this.thresholdHits++;
+          
+          logger.info(`[${this.symbol}] Threshold hit detected:`, {
+            hits: this.thresholdHits,
+            currentProgress: (progressPercent * 100).toFixed(2) + "%",
+            highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
+            pullbackThreshold: (dynamicPullbackThreshold * 100).toFixed(2) + "%"
+          });
 
-			// Check for pullback closure after reaching threshold
-			if (this.hasReachedThreshold) {
-				if (progressPercent <= POSITION_SETTINGS.pullbackThreshold || progressPercent >= 1.0) {
-					logger.info(`[${this.symbol}] Closing position:`, {
-						reason: progressPercent >= 1.0 ? "Take profit reached" : "Pullback threshold hit",
-						currentProgress: (progressPercent * 100).toFixed(2) + "%",
-						highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
-					});
-					await this.closePosition();
-					return;
-				}
-			}
-		} catch (error) {
-			logger.error(`[${this.symbol}] Error in position monitoring:`, error);
-		}
-	}
+          if (this.thresholdHits >= 2) {
+            logger.info(`[${this.symbol}] Closing position:`, {
+              reason: progressPercent >= 1.0 ? "Take profit reached" : "Dynamic pullback threshold hit",
+              hits: this.thresholdHits,
+              currentProgress: (progressPercent * 100).toFixed(2) + "%",
+              highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
+              pullbackThreshold: (dynamicPullbackThreshold * 100).toFixed(2) + "%"
+            });
+            await this.closePosition();
+            return;
+          }
+        } else {
+          // Reset hit counter if we're not at a closing threshold
+          this.thresholdHits = 0;
+        }
+      }
+    } catch (error) {
+      logger.error(`[${this.symbol}] Error in position monitoring:`, error);
+    }
+  }
 
-	async closePosition() {
-		this.isAdjusting = true;
-		try {
-			await execAsync(
-				`node src/manage-position.js close ${this.symbol} ${this.direction}`,
-				{ maxBuffer: 1024 * 1024 * 10 } // 10MB buffer
-			);
+
+	// async closePosition() {
+	// 	try {
+	// 		await execAsync(
+	// 			`node src/manage-position.js close ${this.symbol} ${this.direction}`,
+	// 			{ maxBuffer: 1024 * 1024 * 10 } // 10MB buffer
+	// 		);
+	// 		console.log("Waiting 15s before continuing");
+	// 		await utils.sleep(15000);
+	// 		this.stopMonitoring();
+	// 	} catch (error) {
+	// 		logger.error(`[${this.symbol}] Failed to close position:`, error);
+	// 	}
+	// }
+
+
+  async closePosition() {
+    try {
+      await execAsync(`node src/manage-position.js close ${this.symbol} ${this.direction}`, { maxBuffer: 1024 * 1024 * 10 });
       console.log("Waiting 15s before continuing");
       await utils.sleep(15000);
-			this.stopMonitoring();
-		} catch (error) {
-			logger.error(`[${this.symbol}] Failed to close position:`, error);
-		} finally {
-			this.isAdjusting = false;
-		}
-	}
+      this.stopMonitoring();
+    } catch (error) {
+      logger.error(`[${this.symbol}] Failed to close position:`, error);
+    }
+  }
 
-	stopMonitoring() {
-		if (this.positionMonitorInterval) {
-			clearInterval(this.positionMonitorInterval);
-			this.positionMonitorInterval = null;
-		}
-		this.hasReachedThreshold = false;
-		this.highestProgress = 0;
-		logger.info(`[${this.symbol}] Stopped monitoring`);
-	}
+	// stopMonitoring() {
+	// 	if (this.positionMonitorInterval) {
+	// 		clearInterval(this.positionMonitorInterval);
+	// 		this.positionMonitorInterval = null;
+	// 	}
+	// 	this.hasReachedThreshold = false;
+	// 	this.highestProgress = 0;
+	// 	logger.info(`[${this.symbol}] Stopped monitoring`);
+	// }
+
+  stopMonitoring() {
+    if (this.positionMonitorInterval) {
+      clearInterval(this.positionMonitorInterval);
+      this.positionMonitorInterval = null;
+    }
+    this.hasReachedThreshold = false;
+    this.highestProgress = 0;
+    this.thresholdHits = 0;
+    logger.info(`[${this.symbol}] Stopped monitoring`);
+  }
 
 	shutdown() {
 		this.stopMonitoring();
@@ -331,35 +456,6 @@ class DirectionalTradingManager {
 			throw error;
 		}
 	}
-
-	// async processSignal(signalData) {
-	//   // Verify signal matches our direction
-	//   const signalDirection = signalData.direction === 1 ? "long" : "short";
-	//   if (signalDirection !== this.direction) {
-	//     logger.info(`[${this.direction}] Ignoring ${signalDirection} signal`);
-	//     return;
-	//   }
-
-	//   if (this.isProcessing) {
-	//     logger.info(`[${this.direction}] Already processing signal, queued for next cycle`);
-	//     return;
-	//   }
-
-	//   this.isProcessing = true;
-	//   try {
-	//     const manager = this.symbolManagers.get(signalData.symbol);
-	//     if (!manager) {
-	//       logger.info(`[${this.direction}] No manager found for ${signalData.symbol}`);
-	//       return;
-	//     }
-
-	//     await manager.processSignal(signalData);
-	//   } catch (error) {
-	//     logger.error(`[${this.direction}] Error processing signal:`, error);
-	//   } finally {
-	//     this.isProcessing = false;
-	//   }
-	// }
 
 	async processSignal(signalData) {
 		// Verify signal matches our direction
