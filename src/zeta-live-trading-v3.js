@@ -125,9 +125,9 @@ class SymbolTradingManager {
                 { maxBuffer: 1024 * 1024 * 10 }
               );
               console.log("Waiting 15s before continuing");
-              await utils.sleep(15000);        
+              await utils.sleep(15000);
   
-              this.startPositionMonitor();
+              // this.startPositionMonitor();
             } catch (error) {
               logger.error(`[${this.symbol}] Failed to open position:`, error);
             }
@@ -176,7 +176,6 @@ class SymbolTradingManager {
         console.log("Waiting 15s before continuing");
         await utils.sleep(15000);
   
-
 				return;
 
 			}
