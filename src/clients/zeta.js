@@ -381,7 +381,7 @@ Opening ${direction} position:
 
 		const side = direction == "long" ? types.Side.ASK : types.Side.BID;
 
-		const closePrice = this.getClosePrice(marketIndex, side);
+		const closePrice = await this.getClosePrice(marketIndex, side);
 
 		let transaction = new Transaction();
 
@@ -411,34 +411,73 @@ Opening ${direction} position:
 		}
 	}
 
-	getClosePrice(marketIndex, side) {
-		// Get orderbook data
-		Exchange.getPerpMarket(marketIndex).forceFetchOrderbook();
-		const orderbook = Exchange.getOrderbook(marketIndex);
+	async getClosePrice(marketIndex, side) {
+		try {
+			const { bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
 
-		if (!orderbook?.asks?.[0]?.price || !orderbook?.bids?.[0]?.price) {
-			throw new Error("Invalid orderbook data for price calculation");
+			// Calculate current price based on side
+			const currentPrice = side === types.Side.BID ? bestAsk : bestBid;
+
+			const makerOrTaker = "taker";
+			const slippage = 0.0001;
+
+			// Calculate adjusted price with slippage
+			const closePrice = this.roundToTickSize(
+				makerOrTaker === "maker"
+					? side === types.Side.BID
+						? currentPrice + slippage
+						: currentPrice - slippage
+					: side === types.Side.BID
+					? currentPrice * (1 + slippage * 5)
+					: currentPrice * (1 - slippage * 5)
+			);
+
+			logger.info("Close price calculation:", {
+				market: assets.assetToName(marketIndex),
+				side: side === types.Side.BID ? "BUY" : "SELL",
+				spread: spread.toFixed(4) + "%",
+				bestAsk: bestAsk.toFixed(4),
+				bestBid: bestBid.toFixed(4),
+				closePrice: closePrice.toFixed(4),
+			});
+
+			return closePrice;
+		} catch (error) {
+			logger.error("Error calculating close price:", error);
+			throw error;
 		}
-
-		// Calculate current price based on side
-		const currentPrice = side === types.Side.BID ? orderbook.asks[0].price : orderbook.bids[0].price;
-
-		const makerOrTaker = "taker";
-
-		// Calculate adjusted price with slippage
-		const slippage = 0.0001;
-		const closePrice = this.roundToTickSize(
-			makerOrTaker === "maker"
-				? side === types.Side.BID
-					? currentPrice + slippage
-					: currentPrice - slippage
-				: side === types.Side.BID
-				? currentPrice * (1 + slippage * 5)
-				: currentPrice * (1 - slippage * 5)
-		);
-
-		return closePrice;
 	}
+
+  // 12/20/24 replaced with above
+  // ************************************
+	// getClosePrice(marketIndex, side) {
+	// 	// Get orderbook data
+	// 	Exchange.getPerpMarket(marketIndex).forceFetchOrderbook();
+	// 	const orderbook = Exchange.getOrderbook(marketIndex);
+
+	// 	if (!orderbook?.asks?.[0]?.price || !orderbook?.bids?.[0]?.price) {
+	// 		throw new Error("Invalid orderbook data for price calculation");
+	// 	}
+
+	// 	// Calculate current price based on side
+	// 	const currentPrice = side === types.Side.BID ? orderbook.asks[0].price : orderbook.bids[0].price;
+
+	// 	const makerOrTaker = "taker";
+
+	// 	// Calculate adjusted price with slippage
+	// 	const slippage = 0.0001;
+	// 	const closePrice = this.roundToTickSize(
+	// 		makerOrTaker === "maker"
+	// 			? side === types.Side.BID
+	// 				? currentPrice + slippage
+	// 				: currentPrice - slippage
+	// 			: side === types.Side.BID
+	// 			? currentPrice * (1 + slippage * 5)
+	// 			: currentPrice * (1 - slippage * 5)
+	// 	);
+
+	// 	return closePrice;
+	// }
 
 	getTriggerOrders(marketIndex = this.activeMarket) {
 		try {
@@ -451,11 +490,11 @@ Opening ${direction} position:
 
 	fetchSettings() {
 		const settings = {
-			leverageMultiplier: 1,
+			leverageMultiplier: 0.5,
 			takeProfitPercentage: 0.036,
 			stopLossPercentage: 0.018,
 			trailingStopLoss: {
-				progressThreshold: 0.3, 
+				progressThreshold: 0.3,
 				stopLossDistance: 0.1,
 			},
 		};
@@ -507,31 +546,36 @@ Opening ${direction} position:
 		};
 	}
 
-  async calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "maker") {
-    if (side === undefined || side === null || !marketIndex || !balance || !settings) {
-      throw new Error("Invalid inputs for price and size calculation");
-    }
-  
-    const { markPrice, bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
-    
-    const slippage = 0.0001;
-    const adjustedPrice = makerOrTaker === "maker" ?
-      side === types.Side.BID ? bestAsk + slippage : bestBid - slippage :
-      side === types.Side.BID ? bestAsk * (1 + slippage * 5) : bestBid * (1 - slippage * 5);
-  
-    const positionSize = (balance * settings.leverageMultiplier) / adjustedPrice;
-    const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
-    const lotSize = Math.floor(positionSize / decimalMinLotSize);
-    const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
-  
-    return {
-      currentPrice: markPrice,
-      adjustedPrice,
-      positionSize,
-      nativeLotSize,
-      spread
-    };
-  }
+	async calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "maker") {
+		if (side === undefined || side === null || !marketIndex || !balance || !settings) {
+			throw new Error("Invalid inputs for price and size calculation");
+		}
+
+		const { markPrice, bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
+
+		const slippage = 0.0001;
+		const adjustedPrice =
+			makerOrTaker === "maker"
+				? side === types.Side.BID
+					? bestAsk + slippage
+					: bestBid - slippage
+				: side === types.Side.BID
+				? bestAsk * (1 + slippage * 5)
+				: bestBid * (1 - slippage * 5);
+
+		const positionSize = (balance * settings.leverageMultiplier) / adjustedPrice;
+		const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
+		const lotSize = Math.floor(positionSize / decimalMinLotSize);
+		const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
+
+		return {
+			currentPrice: markPrice,
+			adjustedPrice,
+			positionSize,
+			nativeLotSize,
+			spread,
+		};
+	}
 
 	/* 12/20/24 replaced with above
   *********************************
