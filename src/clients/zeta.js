@@ -204,7 +204,7 @@ export class ZetaClientWrapper {
 	}
 
 	async cancelAllTriggerOrders(marketIndex) {
-		await this.client.updateState();
+		await this.client.updateState(true, true);
 		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
 
 		if (openTriggerOrders && openTriggerOrders.length > 0) {
