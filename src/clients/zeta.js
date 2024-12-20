@@ -287,6 +287,8 @@ Opening ${direction} position:
 
 		await this.updatePriorityFees();
 
+		await this.client.updateState(true, true);
+
 		const triggerBit_TP = this.client.findAvailableTriggerOrderBit() || 0;
 		const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1) || 1;
 
