@@ -492,7 +492,7 @@ Opening ${direction} position:
 
 	fetchSettings() {
 		const settings = {
-			leverageMultiplier: 0.5,
+			leverageMultiplier: 4,
 			takeProfitPercentage: 0.036,
 			stopLossPercentage: 0.018,
 			trailingStopLoss: {

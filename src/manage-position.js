@@ -95,7 +95,7 @@ async function closeTestPosition(asset, direction) {
   try {
     const tx_cancel = await zetaWrapper.cancelAllTriggerOrders(constants.Asset[asset]);
   } catch(error) {
-    console.error("Failed to cancel trigger orders.", tx_cancel);
+    console.error("Failed to cancel trigger orders.", error);
   }
 
 	process.exit(0);
