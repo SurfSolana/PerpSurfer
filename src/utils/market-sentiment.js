@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import axios from 'axios';
 
-const calculateIndex = (percentChanges) => {
+const calculateSentimentMetrics = (percentChanges) => {
   const gainers = percentChanges.filter(x => x > 0).length;
   const total = percentChanges.length;
   const gainersPercentage = (gainers / total) * 100;
@@ -28,12 +28,19 @@ const calculateIndex = (percentChanges) => {
       magnitudeScore = (positiveAvg / (positiveAvg + negativeAvg)) * 100;
   }
 
-  const finalIndex = Math.round(
+  const index = Math.round(
       (breadthScore * breadthWeight) + 
       (magnitudeScore * magnitudeWeight)
   );
 
-  return Math.min(100, Math.max(0, finalIndex));
+  return Math.min(100, Math.max(0, index));
+};
+
+const calculateIndex = (hourData, dayData) => {
+  const hourlyIndex = calculateSentimentMetrics(hourData);
+  const dailyIndex = calculateSentimentMetrics(dayData);
+  
+  return Math.round((hourlyIndex + dailyIndex) / 2);
 };
 
 const getSentiment = (value) => {
@@ -56,8 +63,10 @@ const getMarketSentiment = async () => {
       }
     });
 
-    const percentChanges = response.data.data.map(coin => coin.quote.USD.percent_change_24h);
-    const index = calculateIndex(percentChanges);
+    const hourlyChanges = response.data.data.map(coin => coin.quote.USD.percent_change_1h);
+    const dailyChanges = response.data.data.map(coin => coin.quote.USD.percent_change_24h);
+    
+    const index = calculateIndex(hourlyChanges, dailyChanges);
     const sentiment = getSentiment(index);
 
     return {
