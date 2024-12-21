@@ -195,7 +195,7 @@ export class ZetaClientWrapper {
     }
   }
 
-  async openPosition(direction, marketIndex = constants.Asset.SOL, makerOrTaker = "maker") {
+  async openPosition(direction, marketIndex = constants.Asset.SOL, makerOrTaker = "taker") {
     try {
       logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
       const txid = await this.openPositionWithTPSLVersioned(direction, marketIndex, makerOrTaker);
@@ -230,7 +230,7 @@ export class ZetaClientWrapper {
     }
   }
 
-  async openPositionWithTPSLVersioned(direction, marketIndex = this.activeMarket, makerOrTaker = "maker") {
+  async openPositionWithTPSLVersioned(direction, marketIndex = this.activeMarket, makerOrTaker = "taker") {
     try {
       logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
 
@@ -394,7 +394,7 @@ Opening ${direction} position:
     };
   }
 
-  calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "maker") {
+  calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "taker") {
     if (side === undefined || side === null || !marketIndex || !balance || !settings) {
       throw new Error("Invalid inputs for price and size calculation");
     }
@@ -434,7 +434,7 @@ Opening ${direction} position:
     };
   }
 
-  createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "maker") {
+  createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
     return this.client.createPlacePerpOrderInstruction(marketIndex, utils.convertDecimalToNativeInteger(adjustedPrice), nativeLotSize, side, {
       orderType: makerOrTaker === "maker" ? types.OrderType.POSTONLYSLIDE : types.OrderType.LIMIT,
       tifOptions: {
