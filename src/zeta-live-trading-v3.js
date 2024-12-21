@@ -67,8 +67,8 @@ async function initializeExchange(markets) {
 			connection,
 			{
 				skipPreflight: true,
-				preflightCommitment: "finalized",
-				commitment: "finalized",
+				preflightCommitment: "confirmed",
+				commitment: "confirmed",
 			},
 			500,
 			true,

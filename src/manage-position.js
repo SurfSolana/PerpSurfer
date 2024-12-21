@@ -9,6 +9,8 @@ import logger from "./utils/logger.js";
 
 dotenv.config();
 
+const delay_ms = 1500;
+
 async function validateAndInitialize(markets) {
 	// Validate environment
 	const requiredEnvVars = ["KEYPAIR_FILE_PATH_LONG", "KEYPAIR_FILE_PATH_SHORT", "RPC_TRADINGBOT"];
@@ -31,10 +33,10 @@ async function validateAndInitialize(markets) {
 		connection,
 		{
 			skipPreflight: true,
-			preflightCommitment: "finalized",
-			commitment: "finalized",
+			preflightCommitment: "confirmed",
+			commitment: "confirmed",
 		},
-		200,
+		25,
 		// false,
 		// connection,
 		// marketsArray,
@@ -55,14 +57,11 @@ async function openTestPosition(asset, direction) {
 	const keypairPath = direction === "long" ? process.env.KEYPAIR_FILE_PATH_LONG : process.env.KEYPAIR_FILE_PATH_SHORT;
 
 	logger.info(`Using keypair path: ${keypairPath}`);
-
   
 	// Initialize Zeta client
 	const zetaWrapper = new ZetaClientWrapper();
   await zetaWrapper.initializeExchange([constants.Asset[asset]]);
 	await zetaWrapper.initialize(keypairPath);
-
-	// await zetaWrapper.cancelAllTriggerOrders(constants.Asset[asset]);
 
   try {
     const tx_cancel = await zetaWrapper.cancelAllTriggerOrders(constants.Asset[asset]);
@@ -71,7 +70,7 @@ async function openTestPosition(asset, direction) {
   }
 
 	// Open position
-	const tx = await zetaWrapper.openPosition(direction, constants.Asset[asset]);
+	const tx_open = await zetaWrapper.openPosition(direction, constants.Asset[asset]);
 
 	process.exit(0);
 }
@@ -88,6 +87,9 @@ async function closeTestPosition(asset, direction) {
 	const zetaWrapper = new ZetaClientWrapper();
   await zetaWrapper.initializeExchange([constants.Asset[asset]]);
 	await zetaWrapper.initialize(keypairPath);
+
+  console.log(`Sleep for ${delay_ms}ms...`)
+  await utils.sleep(delay_ms); // delay_ms after initialize
 
 	// close position
 	const tx_close = await zetaWrapper.closePosition(direction, constants.Asset[asset]);

@@ -75,8 +75,8 @@ export class ZetaClientWrapper {
 			this.connection,
 			{
 				skipPreflight: true,
-				preflightCommitment: "finalized",
-				commitment: "finalized",
+				preflightCommitment: "confirmed",
+				commitment: "confirmed",
 			},
 			25,
 			true
@@ -106,7 +106,7 @@ export class ZetaClientWrapper {
 			this.client = await CrossClient.load(
 				this.connection, // connection: Connection,
 				this.wallet, // wallet: types.Wallet,
-				{ skipPreflight: true, preflightCommitment: "finalized", commitment: "finalized" }, // opts: ConfirmOptions = utils.defaultCommitment(),
+				{ skipPreflight: true, preflightCommitment: "confirmed", commitment: "confirmed" }, // opts: ConfirmOptions = utils.defaultCommitment(),
 				undefined, // callback
 				false, // throttle: boolean = false
 				undefined, // delegator : PublicKey = undefined,
@@ -167,6 +167,7 @@ export class ZetaClientWrapper {
 
 	async getPosition(marketIndex) {
 		try {
+			await Exchange.updateState();
 			await this.client.updateState(true, true);
 			const positions = await this.client.getPositions(marketIndex);
 			console.log("Position check:", {
@@ -203,8 +204,14 @@ export class ZetaClientWrapper {
     */
 	}
 
-	async cancelAllTriggerOrders(marketIndex) {
-		await this.client.updateState(true, true);
+	async cancelAllTriggerOrders(marketIndex) { 
+    
+    await this.updatePriorityFees();
+
+    await Exchange.updateState();
+    
+    await this.client.updateState(true, true);
+
 		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
 
 		if (openTriggerOrders && openTriggerOrders.length > 0) {
@@ -217,10 +224,11 @@ export class ZetaClientWrapper {
 		}
 	}
 
-	async openPosition(direction, marketIndex = this.activeMarket, makerOrTaker = "maker") {
+	async openPosition(direction, marketIndex = this.activeMarket, makerOrTaker = "taker") {
 		logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
 
 		const settings = this.fetchSettings();
+
 		logger.info(`Using settings:`, settings);
 
 		await this.client.updateState(true, true);
@@ -287,10 +295,12 @@ Opening ${direction} position:
 
 		await this.updatePriorityFees();
 
+    await Exchange.updateState();
+
 		await this.client.updateState(true, true);
 
-		const triggerBit_TP = this.client.findAvailableTriggerOrderBit() || 0;
-		const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1) || 1;
+		const triggerBit_TP = this.client.findAvailableTriggerOrderBit();
+		const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1);
 
 		const mainOrderIx = this.createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, "taker");
 		const tpOrderIx = this.createTPOrderInstruction(
@@ -321,8 +331,8 @@ Opening ${direction} position:
 				undefined,
 				{
 					skipPreflight: true,
-					preflightCommitment: "finalized",
-					commitment: "finalized",
+					preflightCommitment: "confirmed",
+					commitment: "confirmed",
 				},
 				false,
 				utils.getZetaLutArr()
@@ -347,7 +357,11 @@ Opening ${direction} position:
 	}
 
 	async closePosition(direction, marketIndex) {
+
+		await this.updatePriorityFees();
+
 		await Exchange.updateState();
+
 		await this.client.updateState(true, true);
 
 		let position = await this.client.getPositions(marketIndex); // <- RIGHT WAY
@@ -377,9 +391,11 @@ Opening ${direction} position:
 			actualPositionSize,
 		});
 
-		await this.client.updateState();
-
 		await this.updatePriorityFees();
+
+		await Exchange.updateState();
+
+		await this.client.updateState(true, true);
 
 		const side = direction == "long" ? types.Side.ASK : types.Side.BID;
 
@@ -387,7 +403,7 @@ Opening ${direction} position:
 
 		let transaction = new Transaction();
 
-		const mainOrderIx = this.createMainOrderInstruction(marketIndex, closePrice, nativeLotSize, side, "taker");
+		const mainOrderIx = this.createCloseOrderInstruction(marketIndex, closePrice, nativeLotSize, side, "taker");
 
 		transaction.add(mainOrderIx);
 
@@ -398,8 +414,8 @@ Opening ${direction} position:
 				undefined,
 				{
 					skipPreflight: true,
-					preflightCommitment: "finalized",
-					commitment: "finalized",
+					preflightCommitment: "confirmed",
+					commitment: "confirmed",
 				},
 				false,
 				utils.getZetaLutArr()
@@ -450,8 +466,8 @@ Opening ${direction} position:
 		}
 	}
 
-  // 12/20/24 replaced with above
-  // ************************************
+	// 12/20/24 replaced with above
+	// ************************************
 	// getClosePrice(marketIndex, side) {
 	// 	// Get orderbook data
 	// 	Exchange.getPerpMarket(marketIndex).forceFetchOrderbook();
@@ -492,7 +508,7 @@ Opening ${direction} position:
 
 	fetchSettings() {
 		const settings = {
-			leverageMultiplier: 4,
+			leverageMultiplier: 0.3,
 			takeProfitPercentage: 0.036,
 			stopLossPercentage: 0.018,
 			trailingStopLoss: {
@@ -699,6 +715,23 @@ Opening ${direction} position:
 		);
 	}
 
+	createCloseOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
+		return this.client.createPlacePerpOrderInstruction(
+			marketIndex,
+			utils.convertDecimalToNativeInteger(adjustedPrice),
+			nativeLotSize,
+			side,
+			{
+				orderType: makerOrTaker === "maker" ? types.OrderType.POSTONLYSLIDE : types.OrderType.LIMIT,
+				tifOptions: {
+					expiryOffset: 180,
+				},
+				reduceOnly: true,
+				tag: constants.DEFAULT_ORDER_TAG,
+			}
+		);
+	}
+
 	createTPOrderInstruction(direction, marketIndex, takeProfitPrice, takeProfitTrigger, nativeLotSize, triggerOrderBit = 0) {
 		const tp_side = direction === "long" ? types.Side.ASK : types.Side.BID;
 		const triggerDirection =
@@ -715,7 +748,7 @@ Opening ${direction} position:
 			types.OrderType.FILLORKILL,
 			triggerOrderBit,
 			{
-				// reduceOnly: true,
+				reduceOnly: true,
 				tag: constants.DEFAULT_ORDER_TAG,
 			}
 		);
@@ -737,7 +770,7 @@ Opening ${direction} position:
 			types.OrderType.FILLORKILL,
 			triggerOrderBit,
 			{
-				// reduceOnly: true,
+				reduceOnly: true,
 				tag: constants.DEFAULT_ORDER_TAG,
 			}
 		);
