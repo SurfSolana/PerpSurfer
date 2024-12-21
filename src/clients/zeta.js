@@ -544,7 +544,7 @@ Opening ${direction} position:
 		};
 	}
 
-	async calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "maker") {
+	async calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "taker") {
 		if (side === undefined || side === null || !marketIndex || !balance || !settings) {
 			throw new Error("Invalid inputs for price and size calculation");
 		}
@@ -680,7 +680,7 @@ Opening ${direction} position:
 		throw new Error(`Unable to find acceptable spread after ${maxWaitTime / 1000}s`);
 	}
 
-	createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "maker") {
+	createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
 		return this.client.createPlacePerpOrderInstruction(
 			marketIndex,
 			utils.convertDecimalToNativeInteger(adjustedPrice),
