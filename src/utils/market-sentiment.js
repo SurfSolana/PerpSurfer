@@ -63,8 +63,8 @@ const getMarketSentiment = async () => {
     return {
       index,
       sentiment,
-      canOpenLong: sentiment.includes('Greed'),
-      canOpenShort: sentiment.includes('Fear'),
+      canOpenLong: sentiment.includes('Greed') || sentiment === 'Neutral',
+      canOpenShort: sentiment.includes('Fear') || sentiment === 'Neutral',
       timestamp: new Date()
     };
   } catch (error) {
