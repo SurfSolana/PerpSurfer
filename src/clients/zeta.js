@@ -235,7 +235,7 @@ export class ZetaClientWrapper {
 
 		let transaction = new Transaction().add(
 			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 500_000,
+				units: 350_000,
 			})
 		);
 
@@ -301,8 +301,8 @@ Opening ${direction} position:
 		);
 
 		transaction.add(mainOrderIx);
-		transaction.add(tpOrderIx);
-		transaction.add(slOrderIx);
+		// transaction.add(tpOrderIx);
+		// transaction.add(slOrderIx);
 
 		try {
 			const txid = await utils.processTransaction(
@@ -488,7 +488,7 @@ Opening ${direction} position:
 
 	fetchSettings() {
 		const settings = {
-			leverageMultiplier: 4.5,
+			leverageMultiplier: 4,
 			takeProfitPercentage: 0.03,
 			stopLossPercentage: 0.015,
 			trailingStopLoss: {
