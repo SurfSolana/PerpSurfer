@@ -45,13 +45,13 @@ async function validateAndInitialize(markets) {
 	);
 
 	await Exchange.load(loadExchangeConfig);
-	logger.info("Exchange loaded successfully");
+	console.log("Exchange loaded successfully");
 
 	return connection;
 }
 
 async function openTestPosition(asset, direction) {
-	logger.info(`Initializing test position: ${direction} ${asset}`);
+	logger.info(`Opening position: ${direction} ${asset}`);
 
 	// Get correct keypair path based on direction
 	const keypairPath = direction === "long" ? process.env.KEYPAIR_FILE_PATH_LONG : process.env.KEYPAIR_FILE_PATH_SHORT;
@@ -76,7 +76,7 @@ async function openTestPosition(asset, direction) {
 }
 
 async function closeTestPosition(asset, direction) {
-	logger.info(`Closing test position: ${direction} ${asset}`);
+	logger.info(`Closing position: ${direction} ${asset}`);
 
 	// Get correct keypair path based on direction
 	const keypairPath = direction === "long" ? process.env.KEYPAIR_FILE_PATH_LONG : process.env.KEYPAIR_FILE_PATH_SHORT;

@@ -239,26 +239,6 @@ export class ZetaClientWrapper {
 			})
 		);
 
-		let assetIndex = assets.assetToIndex(marketIndex);
-		let market = Exchange.getPerpMarket(marketIndex);
-		let openOrdersPda = null;
-		if (this.client._openOrdersAccounts[assetIndex].equals(PublicKey.default)) {
-			console.log(
-				`[${assets.assetToName(marketIndex)}] User doesn't have open orders account. Initialising for asset ${marketIndex}.`
-			);
-
-			let [initIx, _openOrdersPda] = instructions.initializeOpenOrdersV3Ix(
-				marketIndex,
-				Exchange.getPerpMarket(marketIndex).address,
-				this.client._provider.wallet.publicKey,
-				this.client._accountAddress
-			);
-			openOrdersPda = _openOrdersPda;
-			transaction.add(initIx);
-		} else {
-			openOrdersPda = this.client._openOrdersAccounts[assetIndex];
-		}
-
 		const balance = Exchange.riskCalculator.getCrossMarginAccountState(this.client.account).balance;
 
 		console.log(`BALANCE:`, balance);
@@ -508,9 +488,9 @@ Opening ${direction} position:
 
 	fetchSettings() {
 		const settings = {
-			leverageMultiplier: 0.3,
-			takeProfitPercentage: 0.036,
-			stopLossPercentage: 0.018,
+			leverageMultiplier: 4.5,
+			takeProfitPercentage: 0.03,
+			stopLossPercentage: 0.015,
 			trailingStopLoss: {
 				progressThreshold: 0.3,
 				stopLossDistance: 0.1,
