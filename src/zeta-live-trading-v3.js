@@ -187,8 +187,8 @@ class SymbolTradingManager {
         await execAsync(`node src/cancel-trigger-orders.js cancel ${this.symbol} ${this.direction}`, 
           { maxBuffer: 1024 * 1024 * 10 }
         );
-        console.log("Waiting 15s before continuing");
-        await utils.sleep(15000);
+        console.log("Waiting 35s before continuing");
+        await utils.sleep(35000);
         return;
       }
 
@@ -411,8 +411,8 @@ class SymbolTradingManager {
         { maxBuffer: 1024 * 1024 * 10 }
       );
       
-      logger.info(`[${this.symbol}] Waiting 15s before verifying closure`);
-      await utils.sleep(15000);
+      logger.info(`[${this.symbol}] Waiting 35s before verifying closure`);
+      await utils.sleep(35000);
 
       // Verify closure with retries
       for (let attempt = 1; attempt <= 3; attempt++) {
