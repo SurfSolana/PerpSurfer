@@ -137,8 +137,8 @@ class SymbolTradingManager {
 							await execAsync(`node src/manage-position.js open ${this.symbol} ${isLongSignal ? "long" : "short"}`, {
 								maxBuffer: 1024 * 1024 * 10,
 							});
-							console.log("Waiting 15s before continuing");
-							await utils.sleep(15000);
+							console.log("Waiting 35s before continuing");
+							await utils.sleep(35000);
 
 							// this.startPositionMonitor();
 						} catch (error) {
