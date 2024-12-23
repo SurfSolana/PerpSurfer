@@ -254,6 +254,149 @@ function logWarning(message, details = null) {
 	log("warn", message, details);
 }
 
+// Add new emoji mapping for position status
+function getPositionEmoji(type) {
+	switch (type) {
+		case 'long':
+			return '📈';
+		case 'short':
+			return '📉';
+		case 'profit':
+			return '💰';
+		case 'loss':
+			return '🔻';
+		case 'neutral':
+			return '➖';
+		case 'threshold':
+			return '🎯';
+		case 'warning':
+			return '⚠️';
+		case 'closed':
+			return '✅';
+		default:
+			return '📊';
+	}
+}
+
+// Add closed positions tracking
+let closedPositions = {
+  positions: [],
+  totalPnL: 0
+};
+
+function addClosedPosition(position) {
+  closedPositions.positions.push({
+    ...position,
+    closedAt: new Date()
+  });
+  closedPositions.totalPnL += position.realizedPnl || 0;
+}
+
+function clearOldClosedPositions() {
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  closedPositions.positions = closedPositions.positions.filter(p => p.closedAt > oneDayAgo);
+  closedPositions.totalPnL = closedPositions.positions.reduce((sum, p) => sum + (p.realizedPnl || 0), 0);
+}
+
+// Format position details with emojis and colors
+function formatPositionDetails(position) {
+  const direction = position.size > 0 ? 'long' : 'short';
+  const directionEmoji = getPositionEmoji(direction);
+  const profitLoss = position.unrealizedPnl || 0;
+  const plEmoji = profitLoss > 0 ? getPositionEmoji('profit') : 
+          profitLoss < 0 ? getPositionEmoji('loss') : 
+          getPositionEmoji('neutral');
+
+  // Color formatting for values
+  const plColor = profitLoss > 0 ? '🟢' : profitLoss < 0 ? '🔴' : '⚪';
+  const progressColor = position.progress >= 0.3 ? '🟢' : '⚪';
+  
+  return `${directionEmoji} ${position.symbol}:
+💲 Entry: $${position.entryPrice.toFixed(4)}
+📍 Current: $${position.currentPrice.toFixed(4)}
+${plColor} PnL: ${profitLoss > 0 ? '+' : ''}${(profitLoss * 100).toFixed(2)}%
+${progressColor} Progress: ${(position.progress * 100).toFixed(2)}%
+⛔️ SL: $${position.stopLoss?.toFixed(4) || 'N/A'}
+🎯 TP: $${position.takeProfit?.toFixed(4) || 'N/A'}
+${position.hasReachedThreshold ? '🔒' : '🔓'}`;
+}
+
+// New function to format closed positions summary
+function formatClosedPositionsSummary() {
+  if (closedPositions.positions.length === 0) return '';
+
+  const summary = closedPositions.positions.map(p => {
+    const plColor = p.realizedPnl > 0 ? '🟢' : '🔴';
+    return `${p.symbol}: ${plColor}${(p.realizedPnl * 100).toFixed(2)}%`;
+  }).join(', ');
+
+  const totalColor = closedPositions.totalPnL > 0 ? '🟢' : '🔴';
+  return `\n\n📊 24h Closed Positions:\n${totalColor} Total: ${(closedPositions.totalPnL * 100).toFixed(2)}%\n${summary}`;
+}
+
+// Update the hourly update function
+async function sendHourlyUpdate(positions, isStartup = false) {
+  if (!isTelegramConfigured || !positions) {
+    return;
+  }
+
+  clearOldClosedPositions();
+  const timestamp = new Date().toLocaleString();
+  let message = isStartup ? 
+    `🚀 Startup Status (${timestamp})\n\n` :
+    `🕐 Hourly Update (${timestamp})\n\n`;
+
+  if (!positions.length) {
+    message += '📭 No active positions';
+    if (closedPositions.positions.length > 0) {
+      message += formatClosedPositionsSummary();
+    }
+  } else {
+    // Split positions into longs and shorts
+    const longs = positions.filter(p => p.size > 0);
+    const shorts = positions.filter(p => p.size < 0);
+
+    // Calculate total PnL including closed positions
+    const activePnL = positions.reduce((sum, p) => sum + (p.unrealizedPnl || 0), 0);
+    const totalPnL = activePnL + closedPositions.totalPnL;
+    const totalPnLColor = totalPnL > 0 ? '🟢' : totalPnL < 0 ? '🔴' : '⚪';
+
+    message += `📊 Active: ${positions.length} | ${totalPnLColor} Total PnL: ${totalPnL > 0 ? '+' : ''}${(totalPnL * 100).toFixed(2)}%\n\n`;
+
+    // Format longs
+    if (longs.length) {
+      message += `📈 LONGS (${longs.length})\n`;
+      message += longs.map(position => formatPositionDetails(position)).join('\n\n');
+    }
+
+    // Add separator between longs and shorts
+    if (longs.length && shorts.length) {
+      message += '\n\n' + '━'.repeat(20) + '\n\n';
+    }
+
+    // Format shorts
+    if (shorts.length) {
+      message += `📉 SHORTS (${shorts.length})\n`;
+      message += shorts.map(position => formatPositionDetails(position)).join('\n\n');
+    }
+
+    // Add closed positions summary
+    if (closedPositions.positions.length > 0) {
+      message += formatClosedPositionsSummary();
+    }
+  }
+
+  const messageParts = splitLongMessage(message);
+  for (const part of messageParts) {
+    try {
+      await bot.sendMessage(ADMIN_CHAT_ID, part, { parse_mode: "HTML" });
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } catch (error) {
+      console.error("Error sending hourly update:", error);
+    }
+  }
+}
+
 export default {
 	error: (message, metadata) => log("error", message, metadata),
 	warn: (message, metadata) => log("warn", message, metadata),
@@ -276,4 +419,6 @@ export default {
 	logDebug,
 	logCritical,
 	logWarning,
+	sendHourlyUpdate,
+	addClosedPosition,
 };

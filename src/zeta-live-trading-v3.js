@@ -243,7 +243,7 @@ class SymbolTradingManager {
       // Handle stop loss
       if (originalStopLossHit) {
         logger.info(`[${this.symbol}] Stop loss hit, attempting to close position`);
-        const closed = await this.closePosition();
+        const closed = await this.closePosition('Stop loss hit');
         if (!closed) {
           logger.warn(`[${this.symbol}] Stop loss closure failed - will retry on next monitor cycle`);
         }
@@ -279,7 +279,7 @@ class SymbolTradingManager {
               pullbackThreshold: (dynamicPullbackThreshold * 100).toFixed(2) + "%"
             });
             
-            const closed = await this.closePosition();
+            const closed = await this.closePosition('Dynamic pullback threshold hit');
             if (!closed) {
               logger.warn(`[${this.symbol}] Pullback closure failed - will retry on next monitor cycle`);
             }
@@ -396,7 +396,7 @@ class SymbolTradingManager {
 
 
 
-  async closePosition() {
+  async closePosition(reason = '') {
     // Prevent concurrent close attempts
     if (this.isClosing) {
       logger.info(`[${this.symbol}] Already attempting to close position`);
@@ -405,6 +405,14 @@ class SymbolTradingManager {
 
     this.isClosing = true;
     try {
+      // Get position details before closing
+      const position = await this.zetaWrapper.getPosition(this.marketIndex);
+      const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
+      const entryPrice = Math.abs(position.costOfTrades / position.size);
+      const realizedPnl = position.size > 0 ? 
+        (currentPrice - entryPrice) / entryPrice :
+        (entryPrice - currentPrice) / entryPrice;
+
       // Attempt to close the position
       await execAsync(
         `node src/manage-position.js close ${this.symbol} ${this.direction}`,
@@ -416,10 +424,21 @@ class SymbolTradingManager {
 
       // Verify closure with retries
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const position = await this.zetaWrapper.getPosition(this.marketIndex);
+        const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
         
-        if (!position || position.size === 0) {
+        if (!verifyPosition || verifyPosition.size === 0) {
           logger.info(`[${this.symbol}] Position closure verified`);
+          
+          // Add to closed positions tracking
+          logger.addClosedPosition({
+            symbol: this.symbol,
+            size: position.size,
+            entryPrice,
+            exitPrice: currentPrice,
+            realizedPnl,
+            reason
+          });
+
           this.stopMonitoring();
           return true;
         }
@@ -607,6 +626,8 @@ class MultiTradingManager {
 		this.messageQueue = [];
 		this.isProcessingQueue = false;
 		this.healthCheckInterval = null;
+		this.statusUpdateInterval = null;
+		this.STATUS_UPDATE_INTERVAL = 3600000; // 1 hour in milliseconds
 	}
 
 	async initialize(symbols) {
@@ -630,6 +651,7 @@ class MultiTradingManager {
 
 			this.setupWebSocket();
 			this.setupHealthCheck();
+			this.setupStatusUpdates(); // Add status update initialization
 
 			logger.info("[INIT] Trading system initialized successfully", {
 				symbols: this.symbols,
@@ -771,9 +793,89 @@ class MultiTradingManager {
 		}, MONITORING_INTERVALS.HEALTH_CHECK);
 	}
 
+	setupStatusUpdates() {
+		// Send immediate status update on startup
+		this.sendStatusUpdate(true);
+
+		this.statusUpdateInterval = setInterval(async () => {
+			await this.sendStatusUpdate(false);
+		}, this.STATUS_UPDATE_INTERVAL);
+	}
+
+	async sendStatusUpdate(isStartup = false) {
+		try {
+			const positions = [];
+			
+			// Gather long positions
+			for (const [symbol, manager] of this.longManager.symbolManagers) {
+				const position = await manager.zetaWrapper.getPosition(manager.marketIndex);
+				if (position && position.size !== 0) {
+					const currentPrice = manager.zetaWrapper.getCalculatedMarkPrice(manager.marketIndex);
+					const entryPrice = Math.abs(position.costOfTrades / position.size);
+					const settings = await manager.zetaWrapper.fetchSettings();
+					const { takeProfitPrice, stopLossPrice } = manager.zetaWrapper.calculateTPSLPrices(
+						"long",
+						entryPrice,
+						settings
+					);
+
+					const progress = (currentPrice - entryPrice) / (takeProfitPrice - entryPrice);
+					const unrealizedPnl = (currentPrice - entryPrice) / entryPrice;
+
+					positions.push({
+						symbol,
+						size: position.size,
+						entryPrice,
+						currentPrice,
+						progress,
+						unrealizedPnl,
+						stopLoss: stopLossPrice,
+						takeProfit: takeProfitPrice,
+						hasReachedThreshold: progress >= 0.3
+					});
+				}
+			}
+
+			// Gather short positions
+			for (const [symbol, manager] of this.shortManager.symbolManagers) {
+				const position = await manager.zetaWrapper.getPosition(manager.marketIndex);
+				if (position && position.size !== 0) {
+					const currentPrice = manager.zetaWrapper.getCalculatedMarkPrice(manager.marketIndex);
+					const entryPrice = Math.abs(position.costOfTrades / position.size);
+					const settings = await manager.zetaWrapper.fetchSettings();
+					const { takeProfitPrice, stopLossPrice } = manager.zetaWrapper.calculateTPSLPrices(
+						"short",
+						entryPrice,
+						settings
+					);
+
+					const progress = (entryPrice - currentPrice) / (entryPrice - takeProfitPrice);
+					const unrealizedPnl = (entryPrice - currentPrice) / entryPrice;
+
+					positions.push({
+						symbol,
+						size: position.size,
+						entryPrice,
+						currentPrice,
+						progress,
+						unrealizedPnl,
+						stopLoss: stopLossPrice,
+						takeProfit: takeProfitPrice,
+						hasReachedThreshold: progress >= 0.3
+					});
+				}
+			}
+
+			await logger.sendHourlyUpdate(positions, isStartup);
+		} catch (error) {
+			logger.error("[STATUS] Error sending status update:", error);
+		}
+	}
+
 	shutdown() {
 		logger.info("[SHUTDOWN] Initiating graceful shutdown");
 		clearInterval(this.healthCheckInterval);
+		clearInterval(this.statusUpdateInterval); // Clear status update interval
 
 		if (this.ws) {
 			this.ws.close();
