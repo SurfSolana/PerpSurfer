@@ -270,7 +270,7 @@ class SymbolTradingManager {
               'No'
           });
 
-          if (this.thresholdHits >= 2) {
+          if (this.thresholdHits >= 5) {
             logger.info(`[${this.symbol}] Attempting to close position:`, {
               reason: "Dynamic pullback threshold hit",
               hits: this.thresholdHits,
