@@ -4,3 +4,8 @@ node_modules/
 combined.log
 error.log
 pnpm-lock.yaml
+# Closed positions data
+data/closed_positions.json
+
+# Keep template
+!data/closed_positions.template.json
