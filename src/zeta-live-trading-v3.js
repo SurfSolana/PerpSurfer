@@ -213,7 +213,7 @@ class SymbolTradingManager {
       this.highestProgress = Math.max(this.highestProgress, progressPercent);
 
       // Dynamic pullback threshold adjusts as price goes higher
-      const dynamicPullbackThreshold = Math.max(0, this.highestProgress - 0.20);
+      const dynamicPullbackThreshold = Math.max(0, this.highestProgress - 0.10);
 
       // Check if stop loss has been hit
       const originalStopLossHit = direction === "long" ? 
@@ -250,8 +250,8 @@ class SymbolTradingManager {
         return;
       }
 
-      // Check initial threshold (30%)
-      if (progressPercent >= 0.30) {
+      // Check initial threshold (33%)
+      if (progressPercent >= 0.33) {
         this.hasReachedThreshold = true;
       }
 
@@ -831,7 +831,7 @@ class MultiTradingManager {
 						unrealizedPnl,
 						stopLoss: stopLossPrice,
 						takeProfit: takeProfitPrice,
-						hasReachedThreshold: progress >= 0.3
+						hasReachedThreshold: progress >= 0.33
 					});
 				}
 			}
