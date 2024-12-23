@@ -58,7 +58,29 @@ function validateConfig() {
 
 async function initializeExchange(markets) {
 	try {
-		const connection = new Connection(process.env.RPC_TRADINGBOT);
+		const connection = new Connection(process.env.RPC_TRADINGBOT, {
+			commitment: "confirmed",
+			confirmTransactionInitialTimeout: 120000,
+			httpHeaders: {},
+			wsEndpoint: process.env.WS_ENDPOINT,
+			retryStrategy: {
+				maxRetries: 10,
+				baseDelay: 500,
+				maxDelay: 10000,
+				exponentialBackoff: true,
+				shouldRetry: (error) => {
+					return error?.message?.includes('429') || 
+						   error?.message?.includes('Too Many Requests') ||
+						   error?.message?.includes('Connection reset by peer');
+				}
+			},
+			wsConnOptions: {
+				handshakeTimeout: 60000,
+				maxPayload: 256 * 1024 * 1024,
+				maxReceivedFrameSize: 100 * 1024 * 1024,
+				maxReceivedMessageSize: 100 * 1024 * 1024
+			}
+		});
 		const marketsToLoad = new Set([constants.Asset.SOL, ...markets]);
 		const marketsArray = Array.from(marketsToLoad);
 
@@ -242,7 +264,14 @@ class SymbolTradingManager {
 
       // Handle stop loss
       if (originalStopLossHit) {
-        logger.info(`[${this.symbol}] Stop loss hit, attempting to close position`);
+        logger.info(`[${this.symbol}] Stop loss hit, attempting to close position`, {
+          symbol: this.symbol,
+          size: currentPosition.size,
+          entryPrice,
+          currentPrice,
+          stopLossPrice,
+          takeProfitPrice
+        });
         const closed = await this.closePosition('Stop loss hit');
         if (!closed) {
           logger.warn(`[${this.symbol}] Stop loss closure failed - will retry on next monitor cycle`);
@@ -409,9 +438,23 @@ class SymbolTradingManager {
       const position = await this.zetaWrapper.getPosition(this.marketIndex);
       const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
       const entryPrice = Math.abs(position.costOfTrades / position.size);
-      const realizedPnl = position.size > 0 ? 
-        (currentPrice - entryPrice) / entryPrice :
-        (entryPrice - currentPrice) / entryPrice;
+      const settings = await this.zetaWrapper.fetchSettings();
+      const { takeProfitPrice, stopLossPrice } = this.zetaWrapper.calculateTPSLPrices(
+        position.size > 0 ? "long" : "short",
+        entryPrice,
+        settings
+      );
+
+      // Log closing attempt with full details
+      logger.info(`[${this.symbol}] Closing position:`, {
+        symbol: this.symbol,
+        size: position.size,
+        entryPrice,
+        currentPrice,
+        stopLossPrice,
+        takeProfitPrice,
+        reason
+      });
 
       // Attempt to close the position
       await execAsync(
@@ -427,7 +470,11 @@ class SymbolTradingManager {
         const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
         
         if (!verifyPosition || verifyPosition.size === 0) {
-          logger.info(`[${this.symbol}] Position closure verified`);
+          // Calculate duration
+          const duration = position.openTime ? Date.now() - position.openTime : null;
+          
+          // Calculate realized PnL
+          const realizedPnl = (currentPrice - entryPrice) / entryPrice * (position.size > 0 ? 1 : -1);
           
           // Add to closed positions tracking
           logger.addClosedPosition({
@@ -435,10 +482,23 @@ class SymbolTradingManager {
             size: position.size,
             entryPrice,
             exitPrice: currentPrice,
+            stopLoss: stopLossPrice,
+            takeProfit: takeProfitPrice,
             realizedPnl,
+            duration,
+            closedAt: new Date(),
             reason
           });
-
+          
+          logger.info(`[${this.symbol}] Position closure verified`, {
+            symbol: this.symbol,
+            size: position.size,
+            entryPrice,
+            exitPrice: currentPrice,
+            duration,
+            reason
+          });
+          
           this.stopMonitoring();
           return true;
         }
@@ -800,6 +860,9 @@ class MultiTradingManager {
 		this.statusUpdateInterval = setInterval(async () => {
 			await this.sendStatusUpdate(false);
 		}, this.STATUS_UPDATE_INTERVAL);
+
+		// Start daily summaries
+		logger.startDailySummary();
 	}
 
 	async sendStatusUpdate(isStartup = false) {
