@@ -421,7 +421,7 @@ Opening ${direction} position:
 
 			// Calculate adjusted price with slippage
 			const closePrice = this.roundToTickSize(
-				makerOrTaker === "maker"
+				makerOrTaker === "taker"
 					? side === types.Side.BID
 						? currentPrice + slippage
 						: currentPrice - slippage
@@ -488,7 +488,7 @@ Opening ${direction} position:
 
 	fetchSettings() {
 		const settings = {
-			leverageMultiplier: 4,
+			leverageMultiplier: 1,
 			takeProfitPercentage: 0.03,
 			stopLossPercentage: 0.015,
 			trailingStopLoss: {
