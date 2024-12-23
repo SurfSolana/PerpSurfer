@@ -390,6 +390,18 @@ let closedPositions = loadClosedPositions();
 
 function loadClosedPositions() {
   try {
+    // Ensure data directory exists
+    const dir = 'data';
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir);
+    }
+
+    // If closed_positions.json doesn't exist but template does, copy it
+    if (!fs.existsSync(CLOSED_POSITIONS_FILE) && fs.existsSync(CLOSED_POSITIONS_FILE + '.template')) {
+      fs.copyFileSync(CLOSED_POSITIONS_FILE + '.template', CLOSED_POSITIONS_FILE);
+      console.log('Created closed_positions.json from template');
+    }
+
     if (fs.existsSync(CLOSED_POSITIONS_FILE)) {
       const data = JSON.parse(fs.readFileSync(CLOSED_POSITIONS_FILE, 'utf8'));
       // Convert stored date strings back to Date objects
