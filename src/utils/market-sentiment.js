@@ -44,11 +44,12 @@ const calculateIndex = (hourData, dayData) => {
 };
 
 const getSentiment = (value) => {
-  if (value >= 80) return 'Extreme Greed';
-  if (value >= 65) return 'Greed';
-  if (value >= 45) return 'Neutral';
-  if (value >= 35) return 'Fear';
-  return 'Extreme Fear';
+  // Using more evenly distributed ranges for better psychological balance
+  if (value >= 80) return 'Extreme Greed';    // Range: 20 points (80-100)
+  if (value >= 60) return 'Greed';            // Range: 20 points (60-79)
+  if (value >= 40) return 'Neutral';          // Range: 20 points (40-59)
+  if (value >= 20) return 'Fear';             // Range: 20 points (20-39)
+  return 'Extreme Fear';                      // Range: 20 points (0-19)
 };
 
 const getMarketSentiment = async () => {
@@ -72,8 +73,8 @@ const getMarketSentiment = async () => {
     return {
       index,
       sentiment,
-      canOpenLong: sentiment.includes('Greed') || sentiment === 'Neutral',
-      canOpenShort: sentiment.includes('Fear') || sentiment === 'Neutral',
+      canOpenLong: !sentiment.includes('Extreme Fear'),
+      canOpenShort: !sentiment.includes('Extreme Greed'),
       timestamp: new Date()
     };
   } catch (error) {

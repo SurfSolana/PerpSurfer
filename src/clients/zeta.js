@@ -154,7 +154,7 @@ export class ZetaClientWrapper {
     */
 
 		Exchange.setUseAutoPriorityFee(false);
-		Exchange.updatePriorityFee(data.result.priorityFeeLevels.high * 1.25);
+		Exchange.updatePriorityFee(Math.floor(data.result.priorityFeeLevels.high * 1.25));
 
 		console.log("Fees: ", data.result.priorityFeeLevels);
 		console.log("Fee Level (high): ", data.result.priorityFeeLevels.high);
@@ -204,13 +204,12 @@ export class ZetaClientWrapper {
     */
 	}
 
-	async cancelAllTriggerOrders(marketIndex) { 
-    
-    await this.updatePriorityFees();
+	async cancelAllTriggerOrders(marketIndex) {
+		await this.updatePriorityFees();
 
-    await Exchange.updateState();
-    
-    await this.client.updateState(true, true);
+		await Exchange.updateState();
+
+		await this.client.updateState(true, true);
 
 		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
 
@@ -275,7 +274,7 @@ Opening ${direction} position:
 
 		await this.updatePriorityFees();
 
-    await Exchange.updateState();
+		await Exchange.updateState();
 
 		await this.client.updateState(true, true);
 
@@ -337,7 +336,6 @@ Opening ${direction} position:
 	}
 
 	async closePosition(direction, marketIndex) {
-
 		await this.updatePriorityFees();
 
 		await Exchange.updateState();
@@ -420,15 +418,14 @@ Opening ${direction} position:
 			const slippage = 0.0001;
 
 			// Calculate adjusted price with slippage
-			const closePrice = this.roundToTickSize(
+			const adjustedPrice =
 				makerOrTaker === "taker"
 					? side === types.Side.BID
-						? currentPrice + slippage
-						: currentPrice - slippage
+						? bestAsk - slippage
+						: bestBid + slippage
 					: side === types.Side.BID
-					? currentPrice * (1 + slippage * 5)
-					: currentPrice * (1 - slippage * 5)
-			);
+					? bestAsk * (1 + slippage * 5)
+					: bestBid * (1 - slippage * 5);
 
 			logger.info("Close price calculation:", {
 				market: assets.assetToName(marketIndex),
@@ -553,10 +550,10 @@ Opening ${direction} position:
 
 		const slippage = 0.0001;
 		const adjustedPrice =
-			makerOrTaker === "maker"
+			makerOrTaker === "taker"
 				? side === types.Side.BID
-					? bestAsk + slippage
-					: bestBid - slippage
+					? bestAsk - slippage
+					: bestBid + slippage
 				: side === types.Side.BID
 				? bestAsk * (1 + slippage * 5)
 				: bestBid * (1 - slippage * 5);
@@ -565,6 +562,17 @@ Opening ${direction} position:
 		const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
 		const lotSize = Math.floor(positionSize / decimalMinLotSize);
 		const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
+
+		logger.info(`Lots Debug:`, {
+			currentPrice: markPrice,
+			bestAsk: bestAsk,
+			bestBid: bestBid,
+			adjustedPrice: adjustedPrice,
+			positionSize: positionSize,
+			decimalMinLotSize: decimalMinLotSize,
+			lotSize: lotSize,
+			nativeLotSize: nativeLotSize,
+		});
 
 		return {
 			currentPrice: markPrice,

@@ -410,7 +410,7 @@ Opening ${direction} position:
     const slippage = 0.0001;
 
     const adjustedPrice =
-      makerOrTaker === "maker" ?
+      makerOrTaker === "taker" ?
         side === types.Side.BID ?
           currentPrice + slippage
         : currentPrice - slippage
