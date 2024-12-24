@@ -427,6 +427,8 @@ Opening ${direction} position:
 					? bestAsk * (1 + slippage * 5)
 					: bestBid * (1 - slippage * 5);
 
+      const closePrice = adjustedPrice;
+
 			logger.info("Close price calculation:", {
 				market: assets.assetToName(marketIndex),
 				side: side === types.Side.BID ? "BUY" : "SELL",
