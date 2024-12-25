@@ -407,29 +407,18 @@ Opening ${direction} position:
 		}
 	}
 
-	async getClosePrice(marketIndex, side) {
+async getClosePrice(marketIndex, side) {
     try {
         const { bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
 
         const slippage = 0.0001; // 1 tick
 
-        // Cross the spread for instant fills:
-        // BID side (buying to close short): 1 tick above ASK
-        // ASK side (selling to close long): 1 tick below BID
-        const closePrice = side === types.Side.BID 
-            ? bestAsk + slippage  // Buying: cross above ASK
-            : bestBid - slippage; // Selling: cross below BID
-
-        /* Maker-taker logic preserved for reference:
-        const closePrice =
-            makerOrTaker === "taker"
-                ? side === types.Side.BID
-                    ? bestAsk + slippage
-                    : bestBid - slippage
-                : side === types.Side.BID
-                ? bestAsk * (1 + slippage * 5)
-                : bestBid * (1 - slippage * 5);
-        */
+        // To ensure immediate fills when closing:
+        // ASK side (selling to close long): go 1 tick BELOW bestBid to guarantee fill
+        // BID side (buying to close short): go 1 tick ABOVE bestAsk to guarantee fill
+        const closePrice = side === types.Side.ASK 
+            ? bestBid - slippage  // Selling: price below BID
+            : bestAsk + slippage; // Buying: price above ASK
 
         logger.info("Close price calculation:", {
             market: assets.assetToName(marketIndex),
