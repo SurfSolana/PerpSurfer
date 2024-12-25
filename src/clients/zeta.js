@@ -408,42 +408,44 @@ Opening ${direction} position:
 	}
 
 	async getClosePrice(marketIndex, side) {
-		try {
-			const { bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
+    try {
+        const { bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
 
-			// Calculate current price based on side
-			const currentPrice = side === types.Side.BID ? bestAsk : bestBid;
+        const slippage = 0.0001; // 1 tick
 
-			const makerOrTaker = "taker";
-			const slippage = 0.0001;
+        // Cross the spread for instant fills:
+        // BID side (buying to close short): 1 tick above ASK
+        // ASK side (selling to close long): 1 tick below BID
+        const closePrice = side === types.Side.BID 
+            ? bestAsk + slippage  // Buying: cross above ASK
+            : bestBid - slippage; // Selling: cross below BID
 
-			// Calculate adjusted price with slippage
-			const adjustedPrice =
-				makerOrTaker === "taker"
-					? side === types.Side.BID
-						? bestAsk - slippage
-						: bestBid + slippage
-					: side === types.Side.BID
-					? bestAsk * (1 + slippage * 5)
-					: bestBid * (1 - slippage * 5);
+        /* Maker-taker logic preserved for reference:
+        const closePrice =
+            makerOrTaker === "taker"
+                ? side === types.Side.BID
+                    ? bestAsk + slippage
+                    : bestBid - slippage
+                : side === types.Side.BID
+                ? bestAsk * (1 + slippage * 5)
+                : bestBid * (1 - slippage * 5);
+        */
 
-      const closePrice = adjustedPrice;
+        logger.info("Close price calculation:", {
+            market: assets.assetToName(marketIndex),
+            side: side === types.Side.BID ? "BUY" : "SELL",
+            spread: spread.toFixed(4) + "%",
+            bestAsk: bestAsk.toFixed(4),
+            bestBid: bestBid.toFixed(4),
+            closePrice: closePrice.toFixed(4),
+        });
 
-			logger.info("Close price calculation:", {
-				market: assets.assetToName(marketIndex),
-				side: side === types.Side.BID ? "BUY" : "SELL",
-				spread: spread.toFixed(4) + "%",
-				bestAsk: bestAsk.toFixed(4),
-				bestBid: bestBid.toFixed(4),
-				closePrice: closePrice.toFixed(4),
-			});
-
-			return closePrice;
-		} catch (error) {
-			logger.error("Error calculating close price:", error);
-			throw error;
-		}
-	}
+        return closePrice;
+    } catch (error) {
+        logger.error("Error calculating close price:", error);
+        throw error;
+    }
+}
 
 	// 12/20/24 replaced with above
 	// ************************************
