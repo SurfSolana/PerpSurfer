@@ -634,6 +634,7 @@ Opening ${direction} position:
 
 	getMarkPriceAndSpread(asset = this.activeMarket) {
 		try {
+      Exchange.updateState();
 			Exchange.getPerpMarket(asset).forceFetchOrderbook();
 			const orderbook = Exchange.getOrderbook(asset);
 
