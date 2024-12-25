@@ -407,34 +407,35 @@ Opening ${direction} position:
 		}
 	}
 
-async getClosePrice(marketIndex, side) {
-    try {
-        const { bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
+	async getClosePrice(marketIndex, side) {
+		try {
+			const { bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
 
-        const slippage = 0.0001; // 1 tick
+			const slippage = 0.0001; // 1 tick
 
-        // To ensure immediate fills when closing:
-        // ASK side (selling to close long): go 1 tick BELOW bestBid to guarantee fill
-        // BID side (buying to close short): go 1 tick ABOVE bestAsk to guarantee fill
-        const closePrice = side === types.Side.ASK 
-            ? bestBid - slippage  // Selling: price below BID
-            : bestAsk + slippage; // Buying: price above ASK
+			// To ensure immediate fills when closing:
+			// ASK side (selling to close long): go 1 tick BELOW bestBid to guarantee fill
+			// BID side (buying to close short): go 1 tick ABOVE bestAsk to guarantee fill
+			const closePrice =
+				side === types.Side.ASK
+					? bestBid - slippage // Selling: price below BID
+					: bestAsk + slippage; // Buying: price above ASK
 
-        logger.info("Close price calculation:", {
-            market: assets.assetToName(marketIndex),
-            side: side === types.Side.BID ? "BUY" : "SELL",
-            spread: spread.toFixed(4) + "%",
-            bestAsk: bestAsk.toFixed(4),
-            bestBid: bestBid.toFixed(4),
-            closePrice: closePrice.toFixed(4),
-        });
+			logger.info("Close price calculation:", {
+				market: assets.assetToName(marketIndex),
+				side: side === types.Side.BID ? "BUY" : "SELL",
+				spread: spread.toFixed(4) + "%",
+				bestAsk: bestAsk.toFixed(4),
+				bestBid: bestBid.toFixed(4),
+				closePrice: closePrice.toFixed(4),
+			});
 
-        return closePrice;
-    } catch (error) {
-        logger.error("Error calculating close price:", error);
-        throw error;
-    }
-}
+			return closePrice;
+		} catch (error) {
+			logger.error("Error calculating close price:", error);
+			throw error;
+		}
+	}
 
 	// 12/20/24 replaced with above
 	// ************************************
@@ -534,57 +535,49 @@ async getClosePrice(marketIndex, side) {
 		};
 	}
 
-async calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "taker") {
-    if (side === undefined || side === null || !marketIndex || !balance || !settings) {
-        throw new Error("Invalid inputs for price and size calculation");
-    }
+	async calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "taker") {
+		if (side === undefined || side === null || !marketIndex || !balance || !settings) {
+			throw new Error("Invalid inputs for price and size calculation");
+		}
 
-    const { markPrice, bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
+		const { markPrice, bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
 
-    const slippage = 0.0001; // 1 tick
-    
-    // Cross the spread for instant fills:
-    // LONG (BID side): 1 tick above ASK
-    // SHORT (ASK side): 1 tick below BID
-    const adjustedPrice = side === types.Side.BID 
-        ? bestAsk + slippage  // Long: cross above ASK
-        : bestBid - slippage; // Short: cross below BID
+		const slippage = 0.0001; // 1 tick
 
-    /* Maker-taker logic preserved for reference:
-    const adjustedPrice =
-        makerOrTaker === "taker"
-            ? side === types.Side.BID
-                ? bestAsk + slippage
-                : bestBid - slippage
-            : side === types.Side.BID
-            ? bestAsk * (1 + slippage * 5)
-            : bestBid * (1 - slippage * 5);
-    */
+		// To ensure immediate fills:
+		// BID side (buying to open long): go 1 tick ABOVE bestAsk
+		// ASK side (selling to open short): go 1 tick BELOW bestBid
+		const adjustedPrice =
+			side === types.Side.BID
+				? bestAsk + slippage // Buying: price above ASK
+				: bestBid - slippage; // Selling: price below BID
 
-    const positionSize = (balance * settings.leverageMultiplier) / adjustedPrice;
-    const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
-    const lotSize = Math.floor(positionSize / decimalMinLotSize);
-    const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
+		const positionSize = (balance * settings.leverageMultiplier) / adjustedPrice;
+		const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
+		const lotSize = Math.floor(positionSize / decimalMinLotSize);
+		const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
 
-    logger.info(`Lots Debug:`, {
-        currentPrice: markPrice,
-        bestAsk: bestAsk,
-        bestBid: bestBid,
-        adjustedPrice: adjustedPrice,
-        positionSize: positionSize,
-        decimalMinLotSize: decimalMinLotSize,
-        lotSize: lotSize,
-        nativeLotSize: nativeLotSize,
-    });
+		logger.info(`Lots Debug:`, {
+			currentPrice: markPrice,
+			bestAsk: bestAsk.toFixed(4),
+			bestBid: bestBid.toFixed(4),
+			adjustedPrice: adjustedPrice.toFixed(4),
+			side: side === types.Side.BID ? "BUY" : "SELL",
+			spread: spread.toFixed(4) + "%",
+			positionSize: positionSize,
+			decimalMinLotSize: decimalMinLotSize,
+			lotSize: lotSize,
+			nativeLotSize: nativeLotSize,
+		});
 
-    return {
-        currentPrice: markPrice,
-        adjustedPrice,
-        positionSize,
-        nativeLotSize,
-        spread,
-    };
-}
+		return {
+			currentPrice: markPrice,
+			adjustedPrice,
+			positionSize,
+			nativeLotSize,
+			spread,
+		};
+	}
 
 	/* 12/20/24 replaced with above
   *********************************
@@ -635,7 +628,7 @@ async calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker 
 
 	getMarkPriceAndSpread(asset = this.activeMarket) {
 		try {
-      Exchange.updateState();
+			Exchange.updateState();
 			Exchange.getPerpMarket(asset).forceFetchOrderbook();
 			const orderbook = Exchange.getOrderbook(asset);
 
