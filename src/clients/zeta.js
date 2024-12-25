@@ -478,7 +478,7 @@ async getClosePrice(marketIndex, side) {
 
 	fetchSettings() {
 		const settings = {
-			leverageMultiplier: 0.25,
+			leverageMultiplier: 4,
 			takeProfitPercentage: 0.036,
 			stopLossPercentage: 0.018,
 			trailingStopLoss: {
