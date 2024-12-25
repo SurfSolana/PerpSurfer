@@ -543,47 +543,57 @@ Opening ${direction} position:
 		};
 	}
 
-	async calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "taker") {
-		if (side === undefined || side === null || !marketIndex || !balance || !settings) {
-			throw new Error("Invalid inputs for price and size calculation");
-		}
+async calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "taker") {
+    if (side === undefined || side === null || !marketIndex || !balance || !settings) {
+        throw new Error("Invalid inputs for price and size calculation");
+    }
 
-		const { markPrice, bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
+    const { markPrice, bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
 
-		const slippage = 0.0001;
-		const adjustedPrice =
-			makerOrTaker === "taker"
-				? side === types.Side.BID
-					? bestAsk - slippage
-					: bestBid + slippage
-				: side === types.Side.BID
-				? bestAsk * (1 + slippage * 5)
-				: bestBid * (1 - slippage * 5);
+    const slippage = 0.0001; // 1 tick
+    
+    // Cross the spread for instant fills:
+    // LONG (BID side): 1 tick above ASK
+    // SHORT (ASK side): 1 tick below BID
+    const adjustedPrice = side === types.Side.BID 
+        ? bestAsk + slippage  // Long: cross above ASK
+        : bestBid - slippage; // Short: cross below BID
 
-		const positionSize = (balance * settings.leverageMultiplier) / adjustedPrice;
-		const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
-		const lotSize = Math.floor(positionSize / decimalMinLotSize);
-		const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
+    /* Maker-taker logic preserved for reference:
+    const adjustedPrice =
+        makerOrTaker === "taker"
+            ? side === types.Side.BID
+                ? bestAsk + slippage
+                : bestBid - slippage
+            : side === types.Side.BID
+            ? bestAsk * (1 + slippage * 5)
+            : bestBid * (1 - slippage * 5);
+    */
 
-		logger.info(`Lots Debug:`, {
-			currentPrice: markPrice,
-			bestAsk: bestAsk,
-			bestBid: bestBid,
-			adjustedPrice: adjustedPrice,
-			positionSize: positionSize,
-			decimalMinLotSize: decimalMinLotSize,
-			lotSize: lotSize,
-			nativeLotSize: nativeLotSize,
-		});
+    const positionSize = (balance * settings.leverageMultiplier) / adjustedPrice;
+    const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
+    const lotSize = Math.floor(positionSize / decimalMinLotSize);
+    const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
 
-		return {
-			currentPrice: markPrice,
-			adjustedPrice,
-			positionSize,
-			nativeLotSize,
-			spread,
-		};
-	}
+    logger.info(`Lots Debug:`, {
+        currentPrice: markPrice,
+        bestAsk: bestAsk,
+        bestBid: bestBid,
+        adjustedPrice: adjustedPrice,
+        positionSize: positionSize,
+        decimalMinLotSize: decimalMinLotSize,
+        lotSize: lotSize,
+        nativeLotSize: nativeLotSize,
+    });
+
+    return {
+        currentPrice: markPrice,
+        adjustedPrice,
+        positionSize,
+        nativeLotSize,
+        spread,
+    };
+}
 
 	/* 12/20/24 replaced with above
   *********************************
