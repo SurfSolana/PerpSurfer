@@ -34,16 +34,16 @@ const CONFIG = {
 	// Position management settings
 	position: {
 		// Initial threshold that triggers trailing stop monitoring (40%)
-		initialThreshold: 0.2,
+		initialThreshold: 0.33,
 
 		// How much price can pull back from highest progress before closing (15%)
-		pullbackAmount: 0.1,
+		pullbackAmount: 0.13,
 
 		// Number of consecutive threshold hits needed to close position
 		thresholdHitCount: 3,
 
 		// Time to wait after position actions (milliseconds)
-		waitAfterAction: 15000,
+		waitAfterAction: 10000,
 
 		// How often to check position progress
 		monitorInterval: 1000,
