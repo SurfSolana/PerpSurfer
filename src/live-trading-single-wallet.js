@@ -26,7 +26,7 @@ const CONFIG = {
 
 	// Monitoring intervals (in milliseconds)
 	intervals: {
-		activePosition: 3000, // How often to check position status
+		activePosition: 2000, // How often to check position status
 		healthCheck: 300000, // System health check interval (5 minutes)
 		statusUpdate: 3600000, // Status update interval (1 hour)
 	},
@@ -37,16 +37,16 @@ const CONFIG = {
 		initialThreshold: 0.2,
 
 		// How much price can pull back from highest progress before closing (15%)
-		pullbackAmount: 0.15,
+		pullbackAmount: 0.1,
 
 		// Number of consecutive threshold hits needed to close position
-		thresholdHitCount: 5,
+		thresholdHitCount: 3,
 
 		// Time to wait after position actions (milliseconds)
-		waitAfterAction: 35000,
+		waitAfterAction: 15000,
 
 		// How often to check position progress
-		monitorInterval: 3000,
+		monitorInterval: 2000,
 	},
 
 	// Trading assets configuration
