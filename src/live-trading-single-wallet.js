@@ -26,7 +26,7 @@ const CONFIG = {
 
 	// Monitoring intervals (in milliseconds)
 	intervals: {
-		activePosition: 2000, // How often to check position status
+		activePosition: 1000, // How often to check position status
 		healthCheck: 300000, // System health check interval (5 minutes)
 		statusUpdate: 3600000, // Status update interval (1 hour)
 	},
@@ -46,7 +46,7 @@ const CONFIG = {
 		waitAfterAction: 15000,
 
 		// How often to check position progress
-		monitorInterval: 2000,
+		monitorInterval: 1000,
 	},
 
 	// Trading assets configuration
