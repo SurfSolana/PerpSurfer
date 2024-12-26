@@ -154,11 +154,11 @@ export class ZetaClientWrapper {
     */
 
 		Exchange.setUseAutoPriorityFee(false);
-		Exchange.updatePriorityFee(Math.floor(data.result.priorityFeeLevels.high * 5));
+		Exchange.updatePriorityFee(Math.floor(data.result.priorityFeeLevels.veryHigh * 0.7));
 
 		console.log("Fees: ", data.result.priorityFeeLevels);
-		console.log("Fee Level (high): ", data.result.priorityFeeLevels.high);
-		console.log("Exchange set to fee * 5:", Exchange._priorityFee);
+		console.log("Fee Level (veryHigh): ", data.result.priorityFeeLevels.veryHigh);
+		console.log("Exchange set to fee * 0.7:", Exchange._priorityFee);
 	}
 
 	isExchangeInitialized() {
