@@ -252,6 +252,7 @@ export class ZetaClientWrapper {
 			"taker"
 		);
 
+  /*
 		const { takeProfitPrice, takeProfitTrigger, stopLossPrice, stopLossTrigger } = this.calculateTPSLPrices(
 			direction,
 			adjustedPrice,
@@ -271,17 +272,19 @@ Opening ${direction} position:
                       ↓
       SL Price ⟶ $${stopLossPrice.toFixed(4)}
 ------------------------------`);
-
+*/
 		await this.updatePriorityFees();
 
 		await Exchange.updateState();
 
 		await this.client.updateState(true, true);
 
-		const triggerBit_TP = this.client.findAvailableTriggerOrderBit();
-		const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1);
+		// const triggerBit_TP = this.client.findAvailableTriggerOrderBit();
+		// const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1);
 
 		const mainOrderIx = this.createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, "taker");
+		
+		/*
 		const tpOrderIx = this.createTPOrderInstruction(
 			direction,
 			marketIndex,
@@ -298,6 +301,7 @@ Opening ${direction} position:
 			nativeLotSize,
 			triggerBit_SL
 		);
+*/
 
 		transaction.add(mainOrderIx);
 		// transaction.add(tpOrderIx);
