@@ -10,7 +10,7 @@ import logger from "./utils/logger.js";
 dotenv.config();
 
 // Time to wait between operations for better transaction handling
-const delay_ms = 500;
+const delay_ms = 1; //set to minimum for tx speed
 
 async function validateAndInitialize(markets) {
     // Validate environment with single wallet configuration
