@@ -104,9 +104,10 @@ class SymbolTradingManager {
 		try {
 			const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 
-			const marketConditions = await getMarketSentiment();
-
 			if (signalData.signal !== 0) {
+				
+				const marketConditions = await getMarketSentiment();
+				
 				// Added comprehensive signal, position, and sentiment analysis logging
 				logger.info(`[${this.symbol}] Trading Analysis:`, {
 					incomingSignal: {
