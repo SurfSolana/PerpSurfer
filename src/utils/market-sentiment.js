@@ -45,10 +45,10 @@ const calculateIndex = (hourData, dayData) => {
 
 const getSentiment = (value) => {
   // Using more evenly distributed ranges for better psychological balance
-  if (value >= 80) return 'Extreme Greed';    // Range: 20 points (80-100)
+  if (value >= 70) return 'Extreme Greed';    // Range: 20 points (80-100)
   if (value >= 60) return 'Greed';            // Range: 20 points (60-79)
   if (value >= 40) return 'Neutral';          // Range: 20 points (40-59)
-  if (value >= 20) return 'Fear';             // Range: 20 points (20-39)
+  if (value >= 30) return 'Fear';             // Range: 20 points (20-39)
   return 'Extreme Fear';                      // Range: 20 points (0-19)
 };
 
