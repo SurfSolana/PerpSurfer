@@ -101,92 +101,172 @@ class SymbolTradingManager {
 	}
 
 	async processSignal(signalData) {
-		const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+    const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 
-		if (signalData.signal !== 0) {
-			const marketConditions = await getMarketSentiment();
+    if (signalData.signal !== 0) {
+        const marketConditions = await getMarketSentiment();
+        
+        logger.info(`[${this.symbol}] Trading Analysis:`, {
+            incomingSignal: {
+                type: signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL",
+                value: signalData.signal,
+            },
+            marketSentiment: {
+                sentiment: marketConditions.sentiment,
+                index: marketConditions.index,
+                allowsLong: marketConditions.canOpenLong,
+                allowsShort: marketConditions.canOpenShort,
+            },
+            existingPosition:
+                currentPosition && currentPosition.size !== 0
+                    ? {
+                            direction: currentPosition.size > 0 ? "LONG" : "SHORT",
+                            size: currentPosition.size,
+                            entryPrice: (currentPosition.costOfTrades / currentPosition.size).toFixed(4),
+                      }
+                    : "No position",
+            analysis:
+                currentPosition && currentPosition.size !== 0
+                    ? `Have ${currentPosition.size > 0 ? "LONG" : "SHORT"} position while receiving ${
+                            signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL"
+                      } signal in ${marketConditions.sentiment} market`
+                    : `No position while receiving ${
+                            signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL"
+                      } signal in ${marketConditions.sentiment} market`,
+        });
+    }
 
-			logger.info(`[${this.symbol}] Trading Analysis:`, {
-				incomingSignal: {
-					type: signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL",
-					value: signalData.signal,
-				},
-				marketSentiment: {
-					sentiment: marketConditions.sentiment,
-					index: marketConditions.index,
-					allowsLong: marketConditions.canOpenLong,
-					allowsShort: marketConditions.canOpenShort,
-				},
-				existingPosition:
-					currentPosition && currentPosition.size !== 0
-						? {
-								direction: currentPosition.size > 0 ? "LONG" : "SHORT",
-								size: currentPosition.size,
-								entryPrice: (currentPosition.costOfTrades / currentPosition.size).toFixed(4),
-						  }
-						: "No position",
-				analysis:
-					currentPosition && currentPosition.size !== 0
-						? `Have ${currentPosition.size > 0 ? "LONG" : "SHORT"} position while receiving ${
-								signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL"
-						  } signal in ${marketConditions.sentiment} market`
-						: `No position while receiving ${
-								signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL"
-						  } signal in ${marketConditions.sentiment} market`,
-			});
-		}
+    // Always check and resume monitoring if needed
+    if (currentPosition && currentPosition.size !== 0) {
+        const existingDirection = currentPosition.size > 0 ? "long" : "short";
 
-		if (currentPosition && currentPosition.size !== 0) {
-			const existingDirection = currentPosition.size > 0 ? "long" : "short";
+        if (!this.positionMonitorInterval) {
+            logger.info(`[${this.symbol}] Found unmonitored ${existingDirection} position during signal processing`, {
+                size: currentPosition.size,
+                entryPrice: (currentPosition.costOfTrades / currentPosition.size).toFixed(4),
+            });
 
-			if (!this.positionMonitorInterval) {
-				logger.info(`[${this.symbol}] Found unmonitored ${existingDirection} position during signal processing`, {
-					size: currentPosition.size,
-					entryPrice: (currentPosition.costOfTrades / currentPosition.size).toFixed(4),
-				});
+            this.currentDirection = existingDirection;
+            this.startPositionMonitor();
+        }
+        return;
+    }
 
-				this.currentDirection = existingDirection;
-				this.startPositionMonitor();
-			}
-			return;
-		}
+    if (signalData.signal === 0) return;
 
-		if (signalData.signal === 0) return;
+    const marketConditions = await getMarketSentiment();
+    const isLongSignal = signalData.signal === 1;
+    const direction = isLongSignal ? "long" : "short";
 
-		const marketConditions = await getMarketSentiment();
-		const isLongSignal = signalData.signal === 1;
-		const direction = isLongSignal ? "long" : "short";
+    if (!(isLongSignal && marketConditions.canOpenLong) && !(!isLongSignal && marketConditions.canOpenShort)) {
+        logger.info(`[${this.symbol}] Skipping position due to market sentiment`, {
+            attemptedDirection: direction,
+            marketSentiment: marketConditions.sentiment,
+            sentimentIndex: marketConditions.index,
+        });
+        return;
+    }
 
-		if (!(isLongSignal && marketConditions.canOpenLong) && !(!isLongSignal && marketConditions.canOpenShort)) {
-			logger.info(`[${this.symbol}] Skipping position due to market sentiment`, {
-				attemptedDirection: direction,
-				marketSentiment: marketConditions.sentiment,
-				sentimentIndex: marketConditions.index,
-			});
-			return;
-		}
+    logger.info(`[${this.symbol}] Opening ${direction} position based on signal and market sentiment`, {
+        direction,
+        marketSentiment: marketConditions.sentiment,
+        sentimentIndex: marketConditions.index,
+    });
 
-		logger.info(`[${this.symbol}] Opening ${direction} position based on signal and market sentiment`, {
-			direction,
-			marketSentiment: marketConditions.sentiment,
-			sentimentIndex: marketConditions.index,
-		});
+    // Try to open position, but always verify state after
+    try {
+        await execAsync(`node src/manage-position-single-wallet.js open ${this.symbol} ${direction}`, {
+            maxBuffer: 1024 * 1024 * 32,
+        });
+    } catch (error) {
+        logger.error(`[${this.symbol}] Position open command failed, verifying position state:`, error);
+    }
 
-		await execAsync(`node src/manage-position-single-wallet.js open ${this.symbol} ${direction}`, {
-			maxBuffer: 1024 * 1024 * 32,
-		});
+    logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying`);
+    await utils.sleep(CONFIG.position.waitAfterAction);
 
-		logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before continuing`);
-		await utils.sleep(CONFIG.position.waitAfterAction);
+    // Always verify position state and resume monitoring if needed
+    const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+    if (verifyPosition && verifyPosition.size !== 0) {
+        const actualDirection = verifyPosition.size > 0 ? "long" : "short";
+        logger.info(`[${this.symbol}] Found active ${actualDirection} position after operation`, {
+            size: verifyPosition.size,
+            entryPrice: (verifyPosition.costOfTrades / verifyPosition.size).toFixed(4),
+        });
 
-		const newPosition = await this.zetaWrapper.getPosition(this.marketIndex);
-		if (newPosition && newPosition.size !== 0) {
-			this.currentDirection = direction;
-			this.startPositionMonitor();
-		} else {
-			logger.warn(`[${this.symbol}] Position open command completed but no position found`);
-		}
-	}
+        this.currentDirection = actualDirection;
+        this.startPositionMonitor();
+    }
+}
+
+async closePosition(reason = "") {
+    if (this.isClosing) {
+        logger.info(`[${this.symbol}] Already attempting to close position`);
+        return false;
+    }
+
+    this.isClosing = true;
+    const position = await this.zetaWrapper.getPosition(this.marketIndex);
+    
+    if (!position || position.size === 0) {
+        logger.info(`[${this.symbol}] No position found to close`);
+        this.stopMonitoring();
+        this.isClosing = false;
+        return true;
+    }
+
+    const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
+    const entryPrice = Math.abs(position.costOfTrades / position.size);
+    const realizedPnl = position.size > 0 ? 
+        (currentPrice - entryPrice) / entryPrice : 
+        (entryPrice - currentPrice) / entryPrice;
+
+    try {
+        await execAsync(`node src/manage-position-single-wallet.js close ${this.symbol} ${this.currentDirection}`, {
+            maxBuffer: 1024 * 1024 * 32,
+        });
+    } catch (error) {
+        logger.error(`[${this.symbol}] Position close command failed, verifying position state:`, error);
+    }
+
+    logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying`);
+    await utils.sleep(CONFIG.position.waitAfterAction);
+
+    // Verify final position state
+    const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+    
+    if (!verifyPosition || verifyPosition.size === 0) {
+        logger.info(`[${this.symbol}] Position closure verified`);
+
+        logger.addClosedPosition({
+            symbol: this.symbol,
+            size: position.size,
+            entryPrice,
+            exitPrice: currentPrice,
+            realizedPnl,
+            reason,
+        });
+
+        this.stopMonitoring();
+        this.isClosing = false;
+        return true;
+    }
+
+    // Position still exists, resume monitoring
+    logger.warn(`[${this.symbol}] Position still active after close attempt, resuming monitoring`, {
+        size: verifyPosition.size,
+        entryPrice: (verifyPosition.costOfTrades / verifyPosition.size).toFixed(4),
+    });
+
+    if (!this.positionMonitorInterval) {
+        const direction = verifyPosition.size > 0 ? "long" : "short";
+        this.currentDirection = direction;
+        this.startPositionMonitor();
+    }
+
+    this.isClosing = false;
+    return false;
+}
 
 	async startPositionMonitor() {
 		if (this.positionMonitorInterval) {
@@ -299,49 +379,6 @@ class SymbolTradingManager {
 		} catch (error) {
 			logger.error(`[${this.symbol}] Error in position monitoring:`, error);
 		}
-	}
-
-	async closePosition(reason = "") {
-		if (this.isClosing) {
-			logger.info(`[${this.symbol}] Already attempting to close position`);
-			return false;
-		}
-
-		this.isClosing = true;
-		const position = await this.zetaWrapper.getPosition(this.marketIndex);
-		const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
-		const entryPrice = Math.abs(position.costOfTrades / position.size);
-		const realizedPnl = position.size > 0 ? (currentPrice - entryPrice) / entryPrice : (entryPrice - currentPrice) / entryPrice;
-
-		await execAsync(`node src/manage-position-single-wallet.js close ${this.symbol} ${this.currentDirection}`, {
-			maxBuffer: 1024 * 1024 * 32,
-		});
-
-		logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying closure`);
-		await utils.sleep(CONFIG.position.waitAfterAction);
-
-		const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
-
-		if (!verifyPosition || verifyPosition.size === 0) {
-			logger.info(`[${this.symbol}] Position closure verified`);
-
-			logger.addClosedPosition({
-				symbol: this.symbol,
-				size: position.size,
-				entryPrice,
-				exitPrice: currentPrice,
-				realizedPnl,
-				reason,
-			});
-
-			this.stopMonitoring();
-			this.isClosing = false;
-			return true;
-		}
-
-		logger.error(`[${this.symbol}] Failed to verify position closure`);
-		this.isClosing = false;
-		return false;
 	}
 
 	stopMonitoring() {
