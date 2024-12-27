@@ -693,9 +693,9 @@ Opening ${direction} position:
 			nativeLotSize,
 			side,
 			{
-				orderType: makerOrTaker === "maker" ? types.OrderType.POSTONLYSLIDE : types.OrderType.LIMIT,
+				orderType: types.OrderType.FILLORKILL,
 				tifOptions: {
-					expiryOffset: 180,
+					expiryOffset: 30,
 				},
 			}
 		);
@@ -708,9 +708,9 @@ Opening ${direction} position:
 			nativeLotSize,
 			side,
 			{
-				orderType: makerOrTaker === "maker" ? types.OrderType.POSTONLYSLIDE : types.OrderType.LIMIT,
+				orderType: types.OrderType.FILLORKILL,
 				tifOptions: {
-					expiryOffset: 180,
+					expiryOffset: 30,
 				},
 				reduceOnly: true,
 				tag: constants.DEFAULT_ORDER_TAG,

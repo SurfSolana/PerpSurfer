@@ -9,8 +9,9 @@ import logger from "./utils/logger.js";
 
 dotenv.config();
 
-// Time to wait between operations for better transaction handling
-const delay_ms = 1; //set to minimum for tx speed
+
+const MAX_RETRIES = 30;
+const RETRY_DELAY = 500; // 1 second between retries
 
 async function validateAndInitialize(markets) {
     // Validate environment with single wallet configuration
@@ -42,6 +43,43 @@ async function validateAndInitialize(markets) {
     return connection;
 }
 
+async function retryOperation(operation, operationName) {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            logger.info(`${operationName} attempt ${attempt}/${MAX_RETRIES}`);
+            const result = await operation();
+            
+            // Check for undefined txSig or other invalid results
+            if (!result) {
+                throw new Error("Transaction failed - no transaction signature returned");
+            }
+            
+            logger.info(`${operationName} successful on attempt ${attempt}`);
+            return result;
+        } catch (error) {
+            const isLastAttempt = attempt === MAX_RETRIES;
+            
+            // Enhanced error logging
+            const errorDetails = {
+                attempt,
+                error: error.message || error.toString(),
+                code: error.code,
+                txError: error.txError,
+            };
+            
+            logger.error(`${operationName} attempt ${attempt} failed:`, errorDetails);
+            
+            if (isLastAttempt) {
+                logger.error(`${operationName} failed after ${MAX_RETRIES} attempts`);
+                throw error;
+            }
+            
+            logger.info(`Waiting ${RETRY_DELAY}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        }
+    }
+}
+
 async function openTestPosition(asset, direction) {
     logger.info(`Opening position: ${direction} ${asset}`);
 
@@ -54,13 +92,38 @@ async function openTestPosition(asset, direction) {
     await zetaWrapper.initializeExchange([constants.Asset[asset]]);
     await zetaWrapper.initialize(keypairPath);
 
-    console.log(`Sleep for ${delay_ms}ms...`)
-    await utils.sleep(delay_ms);
+    try {
+        // Wrap the position opening in the retry mechanism
+        const tx_open = await retryOperation(
+            async () => {
+                const result = await zetaWrapper.openPosition(direction, constants.Asset[asset]);
+                if (!result) {
+                    throw new Error("Failed to open position - no transaction signature returned");
+                }
+                return result;
+            },
+            `open ${direction} position for ${asset}`
+        );
 
-    // Open the position with specified direction
-    const tx_open = await zetaWrapper.openPosition(direction, constants.Asset[asset]);
+        if (tx_open) {
+            logger.info(`Successfully opened ${direction} position for ${asset}`);
+            process.exit(0);
+        } else {
+            throw new Error("Failed to open position - no transaction signature returned");
+        }
+    } catch (error) {
+        // Categorize and enhance the error
+        const errorContext = {
+            direction,
+            asset,
+            type: error.name,
+            details: error.message,
+            code: error.code,
+        };
 
-    process.exit(0);
+        logger.error(`Failed to open ${direction} position for ${asset}`, errorContext);
+        process.exit(1);
+    }
 }
 
 async function closeTestPosition(asset, direction) {
@@ -75,13 +138,31 @@ async function closeTestPosition(asset, direction) {
     await zetaWrapper.initializeExchange([constants.Asset[asset]]);
     await zetaWrapper.initialize(keypairPath);
 
-    console.log(`Sleep for ${delay_ms}ms...`)
-    await utils.sleep(delay_ms);
 
-    // Close the position
-    const tx_close = await zetaWrapper.closePosition(direction, constants.Asset[asset]);
+    
+    try {
+        // Wrap the position closing in the retry mechanism
+        const tx_close = await retryOperation(
+            async () => {
+                const result = await zetaWrapper.closePosition(direction, constants.Asset[asset]);
+                if (!result) {
+                    throw new Error("Failed to close position - no transaction signature returned");
+                }
+                return result;
+            },
+            `close ${direction} position for ${asset}`
+        );
 
-    process.exit(0);
+        if (tx_close) {
+            logger.info(`Successfully closed ${direction} position for ${asset}`);
+            process.exit(0);
+        } else {
+            throw new Error("Failed to close position - no transaction signature returned");
+        }
+    } catch (error) {
+        logger.error(`Failed to close ${direction} position for ${asset}`, error);
+        process.exit(1);
+    }
 }
 
 // Handle process termination gracefully
