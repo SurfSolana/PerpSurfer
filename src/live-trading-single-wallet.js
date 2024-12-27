@@ -105,9 +105,8 @@ class SymbolTradingManager {
 			const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 
 			if (signalData.signal !== 0) {
-				
 				const marketConditions = await getMarketSentiment();
-				
+
 				// Added comprehensive signal, position, and sentiment analysis logging
 				logger.info(`[${this.symbol}] Trading Analysis:`, {
 					incomingSignal: {
@@ -178,24 +177,20 @@ class SymbolTradingManager {
 						sentimentIndex: marketConditions.index,
 					});
 
-					try {
-						await execAsync(`node src/manage-position-single-wallet.js open ${this.symbol} ${direction}`, {
-							maxBuffer: 1024 * 1024 * 32,
-						});
+					await execAsync(`node src/manage-position-single-wallet.js open ${this.symbol} ${direction}`, {
+						maxBuffer: 1024 * 1024 * 32,
+					});
 
-						logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before continuing`);
-						await utils.sleep(CONFIG.position.waitAfterAction);
+					logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before continuing`);
+					await utils.sleep(CONFIG.position.waitAfterAction);
 
-						// After opening position, verify it exists and start monitoring
-						const newPosition = await this.zetaWrapper.getPosition(this.marketIndex);
-						if (newPosition && newPosition.size !== 0) {
-							this.currentDirection = direction;
-							this.startPositionMonitor();
-						} else {
-							logger.warn(`[${this.symbol}] Position open command completed but no position found`);
-						}
-					} catch (error) {
-						logger.error(`[${this.symbol}] Failed to open position:`, error);
+					// After opening position, verify it exists and start monitoring
+					const newPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+					if (newPosition && newPosition.size !== 0) {
+						this.currentDirection = direction;
+						this.startPositionMonitor();
+					} else {
+						logger.warn(`[${this.symbol}] Position open command completed but no position found`);
 					}
 				} else {
 					logger.info(`[${this.symbol}] Skipping position due to market sentiment`, {
@@ -330,52 +325,48 @@ class SymbolTradingManager {
 		}
 
 		this.isClosing = true;
-		try {
-			const position = await this.zetaWrapper.getPosition(this.marketIndex);
-			const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
-			const entryPrice = Math.abs(position.costOfTrades / position.size);
-			const realizedPnl = position.size > 0 ? (currentPrice - entryPrice) / entryPrice : (entryPrice - currentPrice) / entryPrice;
 
-			await execAsync(`node src/manage-position-single-wallet.js close ${this.symbol} ${this.currentDirection}`, {
-				maxBuffer: 1024 * 1024 * 32,
-			});
+		const position = await this.zetaWrapper.getPosition(this.marketIndex);
+		const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
+		const entryPrice = Math.abs(position.costOfTrades / position.size);
+		const realizedPnl = position.size > 0 ? (currentPrice - entryPrice) / entryPrice : (entryPrice - currentPrice) / entryPrice;
 
-			logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying closure`);
-			await utils.sleep(CONFIG.position.waitAfterAction);
+		await execAsync(`node src/manage-position-single-wallet.js close ${this.symbol} ${this.currentDirection}`, {
+			maxBuffer: 1024 * 1024 * 32,
+		});
 
-			for (let attempt = 1; attempt <= 3; attempt++) {
-				const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+		logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying closure`);
+		await utils.sleep(CONFIG.position.waitAfterAction);
 
-				if (!verifyPosition || verifyPosition.size === 0) {
-					logger.info(`[${this.symbol}] Position closure verified`);
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 
-					logger.addClosedPosition({
-						symbol: this.symbol,
-						size: position.size,
-						entryPrice,
-						exitPrice: currentPrice,
-						realizedPnl,
-						reason,
-					});
+			if (!verifyPosition || verifyPosition.size === 0) {
+				logger.info(`[${this.symbol}] Position closure verified`);
 
-					this.stopMonitoring();
-					return true;
-				}
+				logger.addClosedPosition({
+					symbol: this.symbol,
+					size: position.size,
+					entryPrice,
+					exitPrice: currentPrice,
+					realizedPnl,
+					reason,
+				});
 
-				if (attempt < 3) {
-					logger.warn(`[${this.symbol}] Position still exists, attempt ${attempt}/3`);
-					await utils.sleep(5000);
-				}
+				this.stopMonitoring();
+				return true;
 			}
 
-			logger.error(`[${this.symbol}] Failed to verify position closure after 3 attempts`);
-			return false;
-		} catch (error) {
-			logger.error(`[${this.symbol}] Error closing position:`, error);
-			return false;
-		} finally {
-			this.isClosing = false;
+			if (attempt < 3) {
+				logger.warn(`[${this.symbol}] Position still exists, attempt ${attempt}/3`);
+				await utils.sleep(5000);
+			}
 		}
+
+		logger.error(`[${this.symbol}] Failed to verify position closure after 3 attempts`);
+		return false;
+
+		this.isClosing = false;
 	}
 
 	stopMonitoring() {
