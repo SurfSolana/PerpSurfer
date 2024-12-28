@@ -656,7 +656,7 @@ Opening ${direction} position:
 
 	async waitForAcceptableSpread(marketIndex, maxWaitTime = 30000, pollInterval = 1000) {
 		const startTime = Date.now();
-		const MAX_SPREAD = 0.3;
+		const MAX_SPREAD = 0.5;
 		let attempts = 0;
 
 		while (Date.now() - startTime < maxWaitTime) {
