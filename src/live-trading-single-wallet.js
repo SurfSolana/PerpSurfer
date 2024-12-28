@@ -246,8 +246,12 @@ async processSignal(signalData) {
         // Only check extreme conditions if we have a signal
         if (signalData.signal !== 0) {
             const isLongPosition = currentPosition.size > 0;
-            const isExtremeGreed = marketConditions.sentiment === "EXTREME GREED";
-            const isExtremeFear = marketConditions.sentiment === "EXTREME FEAR";
+												
+            // const isExtremeGreed = marketConditions.sentiment === "EXTREME GREED";
+            // const isExtremeFear = marketConditions.sentiment === "EXTREME FEAR";
+
+												const isExtremeGreed = marketConditions.sentiment === "Extreme Greed";
+												const isExtremeFear = marketConditions.sentiment === "Extreme Fear";
 
             // Check if position needs to be closed due to extreme opposite market conditions
             // Close SHORT if EXTREME GREED or LONG if EXTREME FEAR
