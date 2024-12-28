@@ -22,7 +22,7 @@ import {
 } from "@solana/web3.js";
 import fs from "fs";
 import dotenv from "dotenv";
-import logger from "../utils/logger.js";
+import logger from "../../utils/logger.js";
 import { BN } from "@drift-labs/sdk";
 
 dotenv.config();

@@ -1,4 +1,4 @@
-import { ZetaClientWrapper } from "./clients/zeta-api-v6.js";
+import { ZetaClientWrapper } from "./clients/zeta/live-trading-client.js";
 import { Connection } from "@solana/web3.js";
 import { ASSETS, SYMBOLS } from "./config/config.js";
 import logger from "./utils/logger.js";

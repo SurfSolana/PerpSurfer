@@ -2,7 +2,7 @@ import { Wallet, CrossClient, Exchange, Network, Market, utils, types, assets, c
 import { PublicKey, Connection, Keypair, Transaction, TransactionMessage, VersionedTransaction, ComputeBudgetProgram } from "@solana/web3.js";
 import fs from "fs";
 import dotenv from "dotenv";
-import logger from "../utils/logger.js";
+import logger from "../../utils/logger.js";
 import { BN, PriorityFeeMethod, PriorityFeeSubscriber, fetchSolanaPriorityFee } from "@drift-labs/sdk";
 
 dotenv.config();

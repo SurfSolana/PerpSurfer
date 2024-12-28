@@ -1,6 +1,6 @@
-// manage-position.js
+// manage-position-single-wallet.js
 
-import { ZetaClientWrapper } from "./clients/zeta.js";
+import { ZetaClientWrapper } from "./clients/zeta/manage-position-client.js";
 import { Connection } from "@solana/web3.js";
 import { constants, Network, Exchange, types, utils } from "@zetamarkets/sdk";
 import { PriorityFeeMethod, PriorityFeeSubscriber, fetchSolanaPriorityFee } from "@drift-labs/sdk";
@@ -9,122 +9,183 @@ import logger from "./utils/logger.js";
 
 dotenv.config();
 
-const delay_ms = 1500;
+
+const MAX_RETRIES = 30;
+const RETRY_DELAY = 500; // 1 second between retries
 
 async function validateAndInitialize(markets) {
-	// Validate environment
-	const requiredEnvVars = ["KEYPAIR_FILE_PATH_LONG", "KEYPAIR_FILE_PATH_SHORT", "RPC_TRADINGBOT"];
+    // Validate environment with single wallet configuration
+    const requiredEnvVars = ["KEYPAIR_FILE_PATH", "RPC_TRADINGBOT"];
 
-	const missingVars = requiredEnvVars.filter((envVar) => !process.env[envVar]);
+    const missingVars = requiredEnvVars.filter((envVar) => !process.env[envVar]);
 
-	if (missingVars.length > 0) {
-		throw new Error(`Missing required environment variables: ${missingVars.join(", ")}`);
-	}
+    if (missingVars.length > 0) {
+        throw new Error(`Missing required environment variables: ${missingVars.join(", ")}`);
+    }
 
-	// Initialize connection and exchange
-	const connection = new Connection(process.env.RPC_TRADINGBOT);
+    // Initialize connection and exchange
+    const connection = new Connection(process.env.RPC_TRADINGBOT);
 
-	// Create set of markets to load
-	const marketsToLoad = new Set([constants.Asset.SOL, ...markets]);
-	const marketsArray = Array.from(marketsToLoad);
+    const loadExchangeConfig = types.defaultLoadExchangeConfig(
+        Network.MAINNET,
+        connection,
+        {
+            skipPreflight: true,
+            preflightCommitment: "confirmed",
+            commitment: "confirmed",
+        },
+        25
+    );
 
-	const loadExchangeConfig = types.defaultLoadExchangeConfig(
-		Network.MAINNET,
-		connection,
-		{
-			skipPreflight: true,
-			preflightCommitment: "confirmed",
-			commitment: "confirmed",
-		},
-		25,
-		// false,
-		// connection,
-		// marketsArray,
-		// undefined,
-		// marketsArray
-	);
+    await Exchange.load(loadExchangeConfig);
+    console.log("Exchange loaded successfully");
 
-	await Exchange.load(loadExchangeConfig);
-	console.log("Exchange loaded successfully");
+    return connection;
+}
 
-	return connection;
+async function retryOperation(operation, operationName) {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            logger.info(`${operationName} attempt ${attempt}/${MAX_RETRIES}`);
+            const result = await operation();
+            
+            // Check for undefined txSig or other invalid results
+            if (!result) {
+                throw new Error("Transaction failed - no transaction signature returned");
+            }
+            
+            logger.info(`${operationName} successful on attempt ${attempt}`);
+            return result;
+        } catch (error) {
+            const isLastAttempt = attempt === MAX_RETRIES;
+            
+            // Enhanced error logging
+            const errorDetails = {
+                attempt,
+                error: error.message || error.toString(),
+                code: error.code,
+                txError: error.txError,
+            };
+            
+            logger.error(`${operationName} attempt ${attempt} failed:`, errorDetails);
+            
+            if (isLastAttempt) {
+                logger.error(`${operationName} failed after ${MAX_RETRIES} attempts`);
+                throw error;
+            }
+            
+            logger.info(`Waiting ${RETRY_DELAY}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        }
+    }
 }
 
 async function openTestPosition(asset, direction) {
-	logger.info(`Opening position: ${direction} ${asset}`);
+    logger.info(`Opening position: ${direction} ${asset}`);
 
-	// Get correct keypair path based on direction
-	const keypairPath = direction === "long" ? process.env.KEYPAIR_FILE_PATH_LONG : process.env.KEYPAIR_FILE_PATH_SHORT;
-
-	logger.info(`Using keypair path: ${keypairPath}`);
+    // Using single wallet for all operations
+    const keypairPath = process.env.KEYPAIR_FILE_PATH;
+    logger.info(`Using wallet: ${keypairPath}`);
   
-	// Initialize Zeta client
-	const zetaWrapper = new ZetaClientWrapper();
-  await zetaWrapper.initializeExchange([constants.Asset[asset]]);
-	await zetaWrapper.initialize(keypairPath);
+    // Initialize Zeta client with single wallet
+    const zetaWrapper = new ZetaClientWrapper();
+    await zetaWrapper.initializeExchange([constants.Asset[asset]]);
+    await zetaWrapper.initialize(keypairPath);
 
-  try {
-    const tx_cancel = await zetaWrapper.cancelAllTriggerOrders(constants.Asset[asset]);
-  } catch(error) {
-    console.error("Failed to cancel trigger orders.", tx_cancel);
-  }
+    try {
+        // Wrap the position opening in the retry mechanism
+        const tx_open = await retryOperation(
+            async () => {
+                const result = await zetaWrapper.openPosition(direction, constants.Asset[asset]);
+                if (!result) {
+                    throw new Error("Failed to open position - no transaction signature returned");
+                }
+                return result;
+            },
+            `open ${direction} position for ${asset}`
+        );
 
-	// Open position
-	const tx_open = await zetaWrapper.openPosition(direction, constants.Asset[asset]);
+        if (tx_open) {
+            logger.info(`Successfully opened ${direction} position for ${asset}`);
+            process.exit(0);
+        } else {
+            throw new Error("Failed to open position - no transaction signature returned");
+        }
+    } catch (error) {
+        // Categorize and enhance the error
+        const errorContext = {
+            direction,
+            asset,
+            type: error.name,
+            details: error.message,
+            code: error.code,
+        };
 
-	process.exit(0);
+        logger.error(`Failed to open ${direction} position for ${asset}`, errorContext);
+        process.exit(1);
+    }
 }
 
 async function closeTestPosition(asset, direction) {
-	logger.info(`Closing position: ${direction} ${asset}`);
+    logger.info(`Closing position: ${direction} ${asset}`);
 
-	// Get correct keypair path based on direction
-	const keypairPath = direction === "long" ? process.env.KEYPAIR_FILE_PATH_LONG : process.env.KEYPAIR_FILE_PATH_SHORT;
-
-	logger.info(`Using keypair path: ${keypairPath}`);
+    // Using single wallet for all operations
+    const keypairPath = process.env.KEYPAIR_FILE_PATH;
+    logger.info(`Using wallet: ${keypairPath}`);
   
-	// Initialize Zeta client
-	const zetaWrapper = new ZetaClientWrapper();
-  await zetaWrapper.initializeExchange([constants.Asset[asset]]);
-	await zetaWrapper.initialize(keypairPath);
+    // Initialize Zeta client with single wallet
+    const zetaWrapper = new ZetaClientWrapper();
+    await zetaWrapper.initializeExchange([constants.Asset[asset]]);
+    await zetaWrapper.initialize(keypairPath);
 
-  console.log(`Sleep for ${delay_ms}ms...`)
-  await utils.sleep(delay_ms); // delay_ms after initialize
 
-	// close position
-	const tx_close = await zetaWrapper.closePosition(direction, constants.Asset[asset]);
+    
+    try {
+        // Wrap the position closing in the retry mechanism
+        const tx_close = await retryOperation(
+            async () => {
+                const result = await zetaWrapper.closePosition(direction, constants.Asset[asset]);
+                if (!result) {
+                    throw new Error("Failed to close position - no transaction signature returned");
+                }
+                return result;
+            },
+            `close ${direction} position for ${asset}`
+        );
 
-  try {
-    const tx_cancel = await zetaWrapper.cancelAllTriggerOrders(constants.Asset[asset]);
-  } catch(error) {
-    console.error("Failed to cancel trigger orders.", error);
-  }
-
-	process.exit(0);
+        if (tx_close) {
+            logger.info(`Successfully closed ${direction} position for ${asset}`);
+            process.exit(0);
+        } else {
+            throw new Error("Failed to close position - no transaction signature returned");
+        }
+    } catch (error) {
+        logger.error(`Failed to close ${direction} position for ${asset}`, error);
+        process.exit(1);
+    }
 }
 
-
-// Handle process termination
+// Handle process termination gracefully
 process.on("SIGINT", () => {
-	logger.info("Shutting down...");
-	process.exit(0);
+    logger.info("Shutting down...");
+    process.exit(0);
 });
 
 process.on("unhandledRejection", (error) => {
-	logger.error("Unhandled promise rejection:", error);
-	process.exit(1);
+    logger.error("Unhandled promise rejection:", error);
+    process.exit(1);
 });
 
-// Export for command line usage
+// Export functions for potential module usage
 export { openTestPosition, closeTestPosition };
 
-// If running directly
+// Command line interface handler
 if (process.argv[2] && process.argv[3] && process.argv[4]) {
     const action = process.argv[2].toLowerCase(); // "open" or "close"
     const asset = process.argv[3].toUpperCase(); // e.g., "SOL"
     const direction = process.argv[4].toLowerCase(); // "long" or "short"
 
-    // Validate inputs
+    // Validate command line inputs
     if (!["open", "close"].includes(action)) {
         logger.error("Action must be either 'open' or 'close'");
         process.exit(1);
@@ -140,7 +201,7 @@ if (process.argv[2] && process.argv[3] && process.argv[4]) {
         process.exit(1);
     }
 
-    // Execute appropriate function based on action
+    // Execute appropriate action based on command line arguments
     if (action === "open") {
         openTestPosition(asset, direction);
     } else {
