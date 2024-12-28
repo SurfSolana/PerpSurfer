@@ -1,4 +1,4 @@
-// manage-position-single-wallet.js
+// manage-position.js
 
 import { ZetaClientWrapper } from "./clients/zeta/manage-position-client.js";
 import { Connection } from "@solana/web3.js";
@@ -9,9 +9,50 @@ import logger from "./utils/logger.js";
 
 dotenv.config();
 
+const MAX_RETRIES = 60;
 
-const MAX_RETRIES = 30;
-const RETRY_DELAY = 500; // 1 second between retries
+// Helper function to generate a random delay between 1-3 seconds
+function getRandomRetryDelay() {
+  return Math.floor(Math.random() * (3000 - 1000 + 1)) + 1000;
+}
+
+async function retryOperation(operation, operationName) {
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+          logger.info(`${operationName} attempt ${attempt}/${MAX_RETRIES}`);
+          const result = await operation();
+          
+          // Check for undefined txSig or other invalid results
+          if (!result) {
+              throw new Error("Transaction failed - no transaction signature returned");
+          }
+          
+          logger.info(`${operationName} successful on attempt ${attempt}`);
+          return result;
+      } catch (error) {
+          const isLastAttempt = attempt === MAX_RETRIES;
+          
+          // Enhanced error logging
+          const errorDetails = {
+              attempt,
+              error: error.message || error.toString(),
+              code: error.code,
+              txError: error.txError,
+          };
+          
+          logger.error(`${operationName} attempt ${attempt} failed:`, errorDetails);
+          
+          if (isLastAttempt) {
+              logger.error(`${operationName} failed after ${MAX_RETRIES} attempts`);
+              throw error;
+          }
+          
+          const delay = getRandomRetryDelay();
+          logger.info(`Waiting ${delay}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+      }
+  }
+}
 
 async function validateAndInitialize(markets) {
     // Validate environment with single wallet configuration
@@ -41,43 +82,6 @@ async function validateAndInitialize(markets) {
     console.log("Exchange loaded successfully");
 
     return connection;
-}
-
-async function retryOperation(operation, operationName) {
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            logger.info(`${operationName} attempt ${attempt}/${MAX_RETRIES}`);
-            const result = await operation();
-            
-            // Check for undefined txSig or other invalid results
-            if (!result) {
-                throw new Error("Transaction failed - no transaction signature returned");
-            }
-            
-            logger.info(`${operationName} successful on attempt ${attempt}`);
-            return result;
-        } catch (error) {
-            const isLastAttempt = attempt === MAX_RETRIES;
-            
-            // Enhanced error logging
-            const errorDetails = {
-                attempt,
-                error: error.message || error.toString(),
-                code: error.code,
-                txError: error.txError,
-            };
-            
-            logger.error(`${operationName} attempt ${attempt} failed:`, errorDetails);
-            
-            if (isLastAttempt) {
-                logger.error(`${operationName} failed after ${MAX_RETRIES} attempts`);
-                throw error;
-            }
-            
-            logger.info(`Waiting ${RETRY_DELAY}ms before retry...`);
-            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-        }
-    }
 }
 
 async function openTestPosition(asset, direction) {

@@ -1,13 +1,30 @@
 # PerpSurfer Trading Bot
 
-The PerpSurfer Trading Bot is an automated trading system for Zeta Markets perpetual futures. It features intelligent market sentiment analysis, sophisticated risk management, dynamic trailing stop losses, and real-time market signal integration.
+## TLDR & Critical Points ⚠️
+- Use a **fresh wallet** only! Never your main wallet
+- Required API Keys:
+  - Discord bot API key (join Discord for access)
+  - Any Solana RPC endpoint
+  - Helius API key (free tier, for priority fees only - **don't paste the RPC URL**)
+  - CoinMarketCap API key (free tier)
+- Copy both `dotenv.example.txt` to `.env` AND `config.sample.js` to `config.js`
+- Bot filters trades based on market sentiment:
+  - Won't open longs during Extreme Fear
+  - Won't open shorts during Extreme Greed
+  - Will close longs if Extreme Fear, when signal is received
+  - Will close shorts if Extreme Greed, when signal is received
+- Requires minimum total of 0.24-ish SOL:
+  - 0.02-ish SOL for Zeta account creation (refundable)
+  - 0.06-ish SOL for token accounts (refundable)
+  - 0.1--ish SOL for transaction fees
+- USDC deposit required on Zeta for trading collateral
 
 ## Features
 
 The PerpSurfer bot provides a complete perpetual futures trading solution with:
 
-- AI-powered market sentiment analysis for trade filtering
-- Real-time trading signals through secure WebSocket connection
+- Real-time AI Powered trading signals through secure WebSocket connection
+- AI derived market sentiment analysis for trade filtering
 - Intelligent position entry and management
 - Dynamic trailing stop loss with automatic adjustment at profit targets
 - Smart priority fee management using Helius API
@@ -60,19 +77,39 @@ The bot requires several API keys for full functionality:
    - Sign up for a free API key
    - Save your API key
 
-### 2. Wallet Setup
+### 2. Wallet Setup & Funding
 
-The bot requires a dedicated trading wallet:
+The bot requires a dedicated trading wallet with specific SOL requirements:
 
-1. Visit Zeta Markets using our affiliate link: https://dex.zeta.markets/?r=surf
-2. Create a new wallet
-   - Important: Always use a fresh wallet, never your main one
-3. Export your private key:
-   - In SolFlare, click on your wallet address
+Initial Setup Costs:
+- 0.02-ish SOL to open your Zeta Markets account (refundable)
+- 0.02-ish SOL per trading token account (refundable):
+  - SOL account: 0.02 SOL
+  - ETH account: 0.02 SOL
+  - BTC account: 0.02 SOL
+  - Total for token accounts: 0.06 SOL
+- At least 0.1-ish SOL left in wallet for ongoing transaction fees
+
+Total SOL needed: ~0.24-ish SOL minimum (0.02-ish + 0.06 + 0.1-ish)
+
+Additionally:
+- USDC deposit on Zeta for trading collateral (this is what you'll trade with)
+
+Setup Steps:
+1. Create a new wallet
+   - Always use a fresh wallet, never your main one
+   - You'll need to verify you used the affiliate signup to get the API key from the SurfSolana #PerpSurfer discord channel
+2. Visit Zeta Markets using our affiliate link: https://dex.zeta.markets/?r=surf
+3. Fund your wallet with:
+   - At least 0.24 SOL for fees and accounts
+   - USDC for trading collateral
+4. Deposit USDC to Zeta Markets through their UI
+5. Export your private key:
+   - Using SolFlare (because the export format is like so [1,2,3,...]), click on your wallet address
    - Select "Export Private Key"
    - Save the exported array format [1,2,3,...]
 
-4. Create your wallet file:
+6. Create your wallet file:
    ```bash
    # Create a secure directory for wallet
    mkdir -p ~/.perpsurfer/wallet
@@ -81,9 +118,26 @@ The bot requires a dedicated trading wallet:
    nano ~/.perpsurfer/wallet/trading-wallet.json
    ```
 
-   Paste your private key array into the file.
+### 3. Prime Token Accounts
 
-### 3. Project Installation
+Before the bot can trade, you need to "prime" the token accounts on Zeta Markets. This requires approximately 0.02 SOL per token and is refundable when you close the accounts.
+
+To prime an account for each token:
+
+1. Visit Zeta Markets UI: https://dex.zeta.markets
+2. Connect your trading wallet
+3. For each token (SOL, ETH, BTC):
+   - Navigate to the trading page for that token
+   - Place a SELL (short) order with:
+     - Minimum quantity (SOL: 0.1, ETH: 0.01, BTC: 0.001)
+     - Price significantly above market price
+     - Order type: POST-ONLY
+   - Go to the "Orders" tab
+   - Cancel the order
+
+The account will now be primed for that token and ready for automated trading. If you skip this step, you'll receive errors when the bot tries to trade.
+
+### 4. Project Installation
 
 Install pnpm if you haven't already:
 ```bash
@@ -100,11 +154,12 @@ cd PerpSurfer
 pnpm install
 ```
 
-### 4. Configuration
+### 5. Configuration
 
 1. Create your environment file:
    ```bash
    cp dotenv.example.txt .env
+   cp config.sample.js config.js
    ```
 
 2. Edit the `.env` file with your details:
@@ -114,10 +169,8 @@ pnpm install
    WS_HOST=api.nosol.lol
    WS_PORT=8080
 
-   # RPC Url (Chainstack, Helius, Shyft, Quicknode, etc.)
+   # RPC & Priority Fee Configuration
    RPC_TRADINGBOT=your_rpc_endpoint_from_any_provider
-
-   # Priority Fee API Key
    HELIUS_API_KEY=your_helius_api_key_for_priority_fees_only
 
    # Market Sentiment Analysis
@@ -127,17 +180,7 @@ pnpm install
    KEYPAIR_FILE_PATH=/home/yourusername/.perpsurfer/wallet/trading-wallet.json
    ```
 
-3. Set up your configuration:
-   ```bash
-   cp config.sample.js config.js
-   ```
-   
-   The config file contains settings for:
-   - Active trading symbols
-   - Telegram integration
-   - Server identification
-
-### 5. Optional Telegram Setup
+### 6. Optional Telegram Setup
 
 For trade notifications:
 
@@ -157,19 +200,6 @@ For trade notifications:
    TELEGRAM_CHAT_ID=your_chat_id
    ADMIN_CHAT_ID=your_chat_id
    ```
-
-### 6. Testing Market Sentiment
-
-Before running the bot, test the market sentiment analysis:
-```bash
-node src/utils/test-sentiment.js
-```
-
-This will display:
-- Current market sentiment index
-- Sentiment category (Extreme Fear to Extreme Greed)
-- Whether long/short positions are allowed
-- Timestamp of analysis
 
 ### 7. Running the Bot
 
@@ -224,8 +254,8 @@ The bot uses a sophisticated market analysis system that:
 - Calculates market breadth and magnitude scores
 - Determines overall market sentiment
 - Prevents trades during extreme market conditions:
-  - No longs during "Extreme Fear"
-  - No shorts during "Extreme Greed"
+  - No longs during Extreme Fear
+  - No shorts during Extreme Greed
 
 ## Monitoring
 
