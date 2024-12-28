@@ -1,6 +1,6 @@
 import { ZetaClientWrapper } from "./clients/zeta/live-trading-client.js";
 import { Connection } from "@solana/web3.js";
-import { ASSETS, SYMBOLS } from "./config/config.js";
+import { ASSETS, SYMBOLS, ACTIVE_SYMBOLS } from "./config/config.js";
 import logger from "./utils/logger.js";
 import { constants, types, Network, Exchange, utils } from "@zetamarkets/sdk";
 import WebSocket from "ws";
@@ -50,7 +50,8 @@ const CONFIG = {
 	},
 
 	// Trading assets configuration
-	tradingAssets: ["SOL", "BTC", "ETH"],
+	// tradingAssets: ["SOL", "BTC", "ETH"],  ACTIVE_SYMBOLS
+	tradingAssets: ACTIVE_SYMBOLS,  
 
 	// Required environment variables
 	requiredEnvVars: ["KEYPAIR_FILE_PATH", "WS_API_KEY", "RPC_TRADINGBOT"],
