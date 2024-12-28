@@ -166,12 +166,12 @@ export class ZetaClientWrapper {
     try {
       await this.client.updateState();
       const positions = this.client.getPositions(marketIndex);
-
-      console.log("Position check:", {
-        marketIndex,
-        hasPosition: !!positions[0],
-        size: positions[0]?.size || 0,
-      });
+      // Overly unnecessary logging:
+      // console.log("Position check:", {
+      //   marketIndex,
+      //   hasPosition: !!positions[0],
+      //   size: positions[0]?.size || 0,
+      // });
       return positions[0] || null;
     } catch (error) {
       logger.error("Error getting position:", error);
