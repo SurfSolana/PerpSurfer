@@ -5,3 +5,4 @@ combined.log
 error.log
 pnpm-lock.yaml
 ignore_me/
+src/config/config.js
