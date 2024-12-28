@@ -101,23 +101,28 @@ class SymbolTradingManager {
 	}
 
 	async processSignal(signalData) {
-		// First get current position state
-		const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+		let currentPosition;
+		try {
+			currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+		} catch (error) {
+			logger.error(`[${this.symbol}] Error getting position:`, {
+				error: error.message,
+				stack: error.stack,
+			});
+			return;
+		}
 
-		// Initialize market conditions at the start if we have a signal
 		let marketConditions = {
-			// Default values that allow trading to continue
 			sentiment: "NEUTRAL",
-			index: 50, // Neutral sentiment
-			canOpenLong: true, // Allow trading by default
-			canOpenShort: true, // Allow trading by default
+			index: 50,
+			canOpenLong: true,
+			canOpenShort: true,
 		};
 
 		if (signalData.signal !== 0) {
 			try {
 				marketConditions = await getMarketSentiment();
 
-				// Log detailed analysis of current state
 				logger.info(`[${this.symbol}] Trading Analysis:`, {
 					incomingSignal: {
 						type: signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL",
@@ -155,18 +160,14 @@ class SymbolTradingManager {
 			}
 		}
 
-		// Position management section
 		if (currentPosition && currentPosition.size !== 0) {
 			const existingDirection = currentPosition.size > 0 ? "long" : "short";
 
-			// Only check extreme conditions if we have a signal and valid market sentiment (not NEUTRAL from error)
 			if (signalData.signal !== 0 && marketConditions.sentiment !== "NEUTRAL") {
 				const isLongPosition = currentPosition.size > 0;
 				const isExtremeGreed = marketConditions.sentiment === "Extreme Greed";
 				const isExtremeFear = marketConditions.sentiment === "Extreme Fear";
 
-				// Check if position needs to be closed due to extreme opposite market conditions
-				// Close SHORT if EXTREME GREED or LONG if EXTREME FEAR
 				if ((isExtremeGreed && !isLongPosition) || (isExtremeFear && isLongPosition)) {
 					logger.info(`[${this.symbol}] Closing position due to extreme opposite market sentiment`, {
 						positionType: isLongPosition ? "LONG" : "SHORT",
@@ -179,8 +180,6 @@ class SymbolTradingManager {
 					if (closed) {
 						logger.info(`[${this.symbol}] Position closed due to extreme market conditions`);
 
-						// If signal matches the extreme sentiment direction, open new position
-						// LONG signal in EXTREME GREED or SHORT signal in EXTREME FEAR
 						if ((isExtremeGreed && signalData.signal === 1) || (isExtremeFear && signalData.signal === -1)) {
 							const newDirection = signalData.signal === 1 ? "long" : "short";
 							logger.info(
@@ -192,7 +191,10 @@ class SymbolTradingManager {
 									maxBuffer: 1024 * 1024 * 32,
 								});
 							} catch (error) {
-								logger.error(`[${this.symbol}] Position open command failed, verifying position state:`, error);
+								// Log error but continue - we'll verify position state regardless
+								logger.info(`[${this.symbol}] Position command completed with status info:`, {
+									error: error.message,
+								});
 							}
 
 							logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying`);
@@ -209,7 +211,6 @@ class SymbolTradingManager {
 				}
 			}
 
-			// Monitor existing position if not already monitoring
 			if (!this.positionMonitorInterval) {
 				logger.info(`[${this.symbol}] Found unmonitored ${existingDirection} position during signal processing`, {
 					size: currentPosition.size,
@@ -222,14 +223,11 @@ class SymbolTradingManager {
 			return;
 		}
 
-		// Exit if no signal to process
 		if (signalData.signal === 0) return;
 
-		// Process potential new position based on signal
 		const isLongSignal = signalData.signal === 1;
 		const direction = isLongSignal ? "long" : "short";
 
-		// We'll only check market conditions if we successfully fetched them (not NEUTRAL)
 		if (
 			marketConditions.sentiment !== "NEUTRAL" &&
 			((isLongSignal && !marketConditions.canOpenLong) || (!isLongSignal && !marketConditions.canOpenShort))
@@ -242,26 +240,26 @@ class SymbolTradingManager {
 			return;
 		}
 
-		// Proceed with opening new position
 		logger.info(`[${this.symbol}] Opening ${direction} position based on signal and market sentiment`, {
 			direction,
 			marketSentiment: marketConditions.sentiment,
 			sentimentIndex: marketConditions.index,
 		});
 
-		// Try to open position
 		try {
 			await execAsync(`node src/manage-position.js open ${this.symbol} ${direction}`, {
 				maxBuffer: 1024 * 1024 * 32,
 			});
 		} catch (error) {
-			logger.error(`[${this.symbol}] Position open command failed, verifying position state:`, error);
+			// Log error but continue - we'll verify position state regardless
+			logger.info(`[${this.symbol}] Position command completed with status info:`, {
+				error: error.message,
+			});
 		}
 
 		logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying`);
 		await utils.sleep(CONFIG.position.waitAfterAction);
 
-		// Verify position was opened and start monitoring
 		const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 		if (verifyPosition && verifyPosition.size !== 0) {
 			const actualDirection = verifyPosition.size > 0 ? "long" : "short";
