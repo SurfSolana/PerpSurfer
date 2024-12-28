@@ -175,7 +175,7 @@ class SymbolTradingManager {
 
     // Try to open position, but always verify state after
     try {
-        await execAsync(`node src/manage-position-single-wallet.js open ${this.symbol} ${direction}`, {
+        await execAsync(`node src/manage-position.js open ${this.symbol} ${direction}`, {
             maxBuffer: 1024 * 1024 * 32,
         });
     } catch (error) {
@@ -274,7 +274,7 @@ async processSignal(signalData) {
                         logger.info(`[${this.symbol}] Opening ${newDirection} position after closure due to matching signal and market sentiment`);
                         
                         try {
-                            await execAsync(`node src/manage-position-single-wallet.js open ${this.symbol} ${newDirection}`, {
+                            await execAsync(`node src/manage-position.js open ${this.symbol} ${newDirection}`, {
                                 maxBuffer: 1024 * 1024 * 32,
                             });
                         } catch (error) {
@@ -335,7 +335,7 @@ async processSignal(signalData) {
 
     // Try to open position
     try {
-        await execAsync(`node src/manage-position-single-wallet.js open ${this.symbol} ${direction}`, {
+        await execAsync(`node src/manage-position.js open ${this.symbol} ${direction}`, {
             maxBuffer: 1024 * 1024 * 32,
         });
     } catch (error) {
@@ -382,7 +382,7 @@ async closePosition(reason = "") {
         (entryPrice - currentPrice) / entryPrice;
 
     try {
-        await execAsync(`node src/manage-position-single-wallet.js close ${this.symbol} ${this.currentDirection}`, {
+        await execAsync(`node src/manage-position.js close ${this.symbol} ${this.currentDirection}`, {
             maxBuffer: 1024 * 1024 * 32,
         });
     } catch (error) {
