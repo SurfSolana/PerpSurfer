@@ -95,7 +95,7 @@ async function validateAndInitialize(markets) {
 	);
 
 	await Exchange.load(loadExchangeConfig);
-	console.log("Exchange loaded successfully");
+	logger.info("Exchange loaded successfully");
 
 	return connection;
 }
@@ -158,7 +158,7 @@ async function verifyPositionClosed(zetaWrapper, asset, direction) {
 			}
 
 			// Wait 1 second before checking again
-			console.log("Position still open. Waiting 1s.");
+			logger.info("Position still open. Waiting 1s.");
 			await utils.sleep(1000);
 		} catch (error) {
 			logger.error(`Error verifying position closure: ${error.message}`);

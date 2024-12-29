@@ -167,7 +167,7 @@ export class ZetaClientWrapper {
       await this.client.updateState();
       const positions = this.client.getPositions(marketIndex);
       // Overly unnecessary logging:
-      // console.log("Position check:", {
+      // logger.info("Position check:", {
       //   marketIndex,
       //   hasPosition: !!positions[0],
       //   size: positions[0]?.size || 0,
@@ -371,7 +371,7 @@ Opening ${direction} position:
 
     const stopLossTrigger = this.roundToTickSize(isLong ? price - (price - stopLossPrice) * 0.95 : price + (stopLossPrice - price) * 0.95);
 
-    // console.log("Calculated TP/SL Prices:", {
+    // logger.info("Calculated TP/SL Prices:", {
     //   direction,
     //   entryPrice: price.toFixed(4),
     //   takeProfit: {

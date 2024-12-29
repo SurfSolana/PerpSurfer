@@ -13,72 +13,72 @@ if (isTelegramConfigured) {
 }
 
 const logFormat = printf(
-	({ level, message, timestamp, stack, ...metadata }) => {
-		let msg = `${timestamp} [${SERVER_NAME}] [${level}] : ${message}`;
-		if (stack) {
-			msg += `\n${stack}`;
-		}
-		if (Object.keys(metadata).length > 0) {
-			msg += ` ${JSON.stringify(metadata, null, 2)}`;
-		}
-		return msg;
-	}
+    ({ level, message, timestamp, stack, ...metadata }) => {
+        let msg = `${timestamp} [${SERVER_NAME}] [${level}] : ${message}`;
+        if (stack) {
+            msg += `\n${stack}`;
+        }
+        if (Object.keys(metadata).length > 0) {
+            msg += ` ${JSON.stringify(metadata, null, 2)}`;
+        }
+        return msg;
+    }
 );
 
 const logger = winston.createLogger({
-	level: "info",
-	format: combine(timestamp(), errors({ stack: true }), logFormat),
-	transports: [
-		new winston.transports.Console({
-			format: combine(colorize(), logFormat),
-		}),
-		new winston.transports.File({ filename: "error.log", level: "error" }),
-		new winston.transports.File({ filename: "combined.log" }),
-	],
+    level: "info",
+    format: combine(timestamp(), errors({ stack: true }), logFormat),
+    transports: [
+        new winston.transports.Console({
+            format: combine(colorize(), logFormat),
+        }),
+        new winston.transports.File({ filename: "error.log", level: "error" }),
+        new winston.transports.File({ filename: "combined.log" }),
+    ],
 });
 
 // Helper functions remain unchanged...
 function getEmojiForLogLevel(level) {
-	switch (level) {
-		case "error":
-			return "🚫";
-		case "warn":
-			return "⚠️";
-		case "info":
-			return "✅";
-		case "http":
-			return "🌐";
-		case "verbose":
-			return "📝";
-		case "debug":
-			return "🔍";
-		case "silly":
-			return "🃏";
-		default:
-			return "🪵";
-	}
+    switch (level) {
+        case "error":
+            return "🚫";
+        case "warn":
+            return "⚠️";
+        case "info":
+            return "✅";
+        case "http":
+            return "🌐";
+        case "verbose":
+            return "📝";
+        case "debug":
+            return "🔍";
+        case "silly":
+            return "🃏";
+        default:
+            return "🪵";
+    }
 }
 
 function truncate(str, maxLength = 100) {
-	if (str.length <= maxLength) return str;
-	return str.slice(0, maxLength - 3) + "...";
+    if (str.length <= maxLength) return str;
+    return str.slice(0, maxLength - 3) + "...";
 }
 
 function safeStringify(obj, spaces = 2) {
-	return JSON.stringify(
-		obj,
-		(key, value) => (typeof value === "bigint" ? value.toString() : value),
-		spaces
-	);
+    return JSON.stringify(
+        obj,
+        (key, value) => (typeof value === "bigint" ? value.toString() : value),
+        spaces
+    );
 }
 
 function escapeHtml(unsafe) {
-	return unsafe
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#039;");
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
 function splitLongMessage(message, maxLength = 4000) {
@@ -118,164 +118,38 @@ function splitLongMessage(message, maxLength = 4000) {
   return parts.map(part => `<pre>${escapeHtml(part)}</pre>`);
 }
 
-// Debounce time in milliseconds (1000 ms) TG max 1 per second
-const DEBOUNCE_TIME = 1000;
-
-// Object to store accumulated messages for each log level
-const accumulatedMessages = {};
-
-// Timeout IDs for each log level
-const timeouts = {};
-
-async function sendAccumulatedMessages(level) {
-  if (
-      !isTelegramConfigured ||
-      !accumulatedMessages[level] ||
-      accumulatedMessages[level].length === 0
-  ) {
-      return;
-  }
-
-  const emoji = getEmojiForLogLevel(level);
-  const messages = accumulatedMessages[level].join("\n");
-  const messageParts = splitLongMessage(
-      `${emoji} [${SERVER_NAME}] ${level.toUpperCase()}:\n${messages}`
-  );
-
-  for (const part of messageParts) {
-      try {
-          await bot.sendMessage(ADMIN_CHAT_ID, part, { parse_mode: "HTML" });
-          // Add delay between messages to respect rate limits
-          await new Promise(resolve => setTimeout(resolve, 100));
-      } catch (error) {
-          console.error("Error sending message to admin:", error);
-          // Log the problematic message part for debugging
-          console.error("Problematic message part:", part);
-      }
-  }
-
-  accumulatedMessages[level] = [];
-}
-
 function formatMetadata(metadata) {
-	if (Object.keys(metadata).length > 0) {
-		return "\n" + safeStringify(metadata);
-	}
-	return "";
+    if (Object.keys(metadata).length > 0) {
+        return "\n" + safeStringify(metadata);
+    }
+    return "";
 }
 
+// Basic logging function (no Telegram)
 function log(level, message, metadata = {}) {
-	if (metadata instanceof Error) {
-		metadata = { error: metadata.message, stack: metadata.stack };
-	}
-
-	logger.log(level, message, metadata);
-
-	// Only accumulate messages for Telegram if it's configured and not error/debug/silly level
-	if (isTelegramConfigured && !['debug', 'silly'].includes(level)) {
-		const formattedMetadata = formatMetadata(metadata);
-		const telegramMessage = `${message}${formattedMetadata}`;
-
-		if (!accumulatedMessages[level]) {
-			accumulatedMessages[level] = [];
-		}
-		accumulatedMessages[level].push(telegramMessage);
-
-		// Clear existing timeout (if any) and set a new one
-		if (timeouts[level]) {
-			clearTimeout(timeouts[level]);
-		}
-		timeouts[level] = setTimeout(
-			() => sendAccumulatedMessages(level),
-			DEBOUNCE_TIME
-		);
-	}
+    if (metadata instanceof Error) {
+        metadata = { error: metadata.message, stack: metadata.stack };
+    }
+    logger.log(level, message, metadata);
 }
 
-// All utility functions remain unchanged...
-function logPerformance(action, duration) {
-	log("info", `Performance: ${action} completed in ${duration.toFixed(2)}ms`);
-	console.log(`Detailed timing - ${action}: ${duration.toFixed(2)}ms`);
-}
-
-function logError(message, error) {
-	log("error", `Error: ${message}`, error);
-}
-
-function logInitialization(milestone) {
-	log("info", `Initialization: ${milestone}`);
-}
-
-function logTransaction(summary, details) {
-	log("info", `Transaction: ${summary}`, details);
-}
-
-function logPositionUpdate(summary, details) {
-	log("info", `Position Update: ${summary}`, details);
-}
-
-function logStrategySignal(signal, details) {
-	log("info", `Strategy Signal: ${signal}`, details);
-}
-
-function logConfiguration(summary, details) {
-	log("info", `Configuration: ${truncate(summary)}`, details);
-}
-
-function logStateCheck(summary, details) {
-	if (summary) {
-		log("info", `State Check: ${summary}`, details);
-	} else {
-		console.log("State check details:", safeStringify(details));
-	}
-}
-
-function logNetworkEvent(event, details = {}) {
-	log("info", `Network Event: ${event}`, details);
-}
-
-function logPositionManagement(event, details) {
-	log("info", `Position Management: ${event}`, details);
-}
-
-function logMarketData(summary, details) {
-	console.log(`Market Data: ${summary}`, details ? safeStringify(details) : "");
-}
-
-function logDebug(message, data = null) {
-	log("debug", message, data);
-}
-
-function logCritical(message) {
-	log("error", `CRITICAL: ${message}`);
-}
-
-function logWarning(message, details = null) {
-	log("warn", message, details);
-}
-
-// Add new emoji mapping for position status
-function getPositionEmoji(type) {
-	switch (type) {
-		case 'long':
-			return '📈';
-		case 'short':
-			return '📉';
-		case 'profit':
-			return '💰';
-		case 'loss':
-			return '🔻';
-		case 'neutral':
-			return '➖';
-		case 'threshold':
-			return '🎯';
-		case 'warning':
-			return '⚠️';
-		case 'closed':
-			return '✅';
-		default:
-			return '📊';
-	}
+// New notify function for Telegram messages
+async function notify(message, metadata = {}) {
+    if (!isTelegramConfigured) return;
+    
+    const formattedMetadata = formatMetadata(metadata);
+    const telegramMessage = `${message}${formattedMetadata}`;
+    
+    const messageParts = splitLongMessage(telegramMessage);
+    
+    for (const part of messageParts) {
+        try {
+            await bot.sendMessage(ADMIN_CHAT_ID, part, { parse_mode: "HTML" });
+            await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (error) {
+            console.error("Error sending notification:", error);
+        }
+    }
 }
 
 // Add closed positions tracking
@@ -321,7 +195,31 @@ ${progressColor} Progress: ${(position.progress * 100).toFixed(2)}%
 ${position.hasReachedThreshold ? '🔒' : '🔓'}`;
 }
 
-// New function to format closed positions summary
+// Position emoji mapping
+function getPositionEmoji(type) {
+    switch (type) {
+        case 'long':
+            return '📈';
+        case 'short':
+            return '📉';
+        case 'profit':
+            return '💰';
+        case 'loss':
+            return '🔻';
+        case 'neutral':
+            return '➖';
+        case 'threshold':
+            return '🎯';
+        case 'warning':
+            return '⚠️';
+        case 'closed':
+            return '✅';
+        default:
+            return '📊';
+    }
+}
+
+// Format closed positions summary
 function formatClosedPositionsSummary() {
   if (closedPositions.positions.length === 0) return '';
 
@@ -334,7 +232,6 @@ function formatClosedPositionsSummary() {
   return `\n\n📊 24h Closed Positions:\n${totalColor} Total: ${(closedPositions.totalPnL * 100).toFixed(2)}%\n${summary}`;
 }
 
-// Update the hourly update function
 async function sendHourlyUpdate(positions, isStartup = false) {
   if (!isTelegramConfigured || !positions) {
     return;
@@ -398,27 +295,34 @@ async function sendHourlyUpdate(positions, isStartup = false) {
 }
 
 export default {
-	error: (message, metadata) => log("error", message, metadata),
-	warn: (message, metadata) => log("warn", message, metadata),
-	info: (message, metadata) => log("info", message, metadata),
-	http: (message, metadata) => log("http", message, metadata),
-	verbose: (message, metadata) => log("verbose", message, metadata),
-	debug: (message, metadata) => log("debug", message, metadata),
-	silly: (message, metadata) => log("silly", message, metadata),
-	performance: logPerformance,
-	logError,
-	logInitialization,
-	logTransaction,
-	logPositionUpdate,
-	logStrategySignal,
-	logConfiguration,
-	logStateCheck,
-	logNetworkEvent,
-	logPositionManagement,
-	logMarketData,
-	logDebug,
-	logCritical,
-	logWarning,
-	sendHourlyUpdate,
-	addClosedPosition,
+    error: (message, metadata) => log("error", message, metadata),
+    warn: (message, metadata) => log("warn", message, metadata),
+    info: (message, metadata) => log("info", message, metadata),
+    http: (message, metadata) => log("http", message, metadata),
+    verbose: (message, metadata) => log("verbose", message, metadata),
+    debug: (message, metadata) => log("debug", message, metadata),
+    silly: (message, metadata) => log("silly", message, metadata),
+    notify,
+    performance: (action, duration) => log("info", `Performance: ${action} completed in ${duration.toFixed(2)}ms`),
+    logError: (message, error) => log("error", `Error: ${message}`, error),
+    logInitialization: (milestone) => log("info", `Initialization: ${milestone}`),
+    logTransaction: (summary, details) => log("info", `Transaction: ${summary}`, details),
+    logPositionUpdate: (summary, details) => log("info", `Position Update: ${summary}`, details),
+    logStrategySignal: (signal, details) => log("info", `Strategy Signal: ${signal}`, details),
+    logConfiguration: (summary, details) => log("info", `Configuration: ${truncate(summary)}`, details),
+    logStateCheck: (summary, details) => {
+        if (summary) {
+            log("info", `State Check: ${summary}`, details);
+        } else {
+            console.log("State check details:", safeStringify(details));
+        }
+    },
+    logNetworkEvent: (event, details = {}) => log("info", `Network Event: ${event}`, details),
+    logPositionManagement: (event, details) => log("info", `Position Management: ${event}`, details),
+    logMarketData: (summary, details) => console.log(`Market Data: ${summary}`, details ? safeStringify(details) : ""),
+    logDebug: (message, data = null) => log("debug", message, data),
+    logCritical: (message) => log("error", `CRITICAL: ${message}`),
+    logWarning: (message, details = null) => log("warn", message, details),
+    sendHourlyUpdate,
+    addClosedPosition,
 };

@@ -403,7 +403,7 @@ class SymbolTradingManager {
 			const stopLossHit = direction === "long" ? currentPrice <= stopLossPrice : currentPrice >= stopLossPrice;
 
 			// if (this.lastCheckedPrice !== currentPrice) {
-			// 	console.log(`[${this.symbol}] Position progress:`, {
+			// 	logger.info(`[${this.symbol}] Position progress:`, {
 			// 		direction: direction === "long" ? "LONG" : "SHORT",
 			// 		entryPrice: entryPrice.toFixed(4),
 			// 		currentPrice: currentPrice.toFixed(4),
@@ -475,7 +475,7 @@ class SymbolTradingManager {
 
 				output += "\n─────────────────────────────────────────────────────────";
 
-				console.log(output);
+				logger.info(output);
 				this.lastCheckedPrice = currentPrice;
 			}
 
@@ -697,7 +697,7 @@ class TradingManager {
 				}
 
 				this.messageQueue.push(signalData);
-				console.log(`[WS] Queued signal for ${signalData.symbol}`);
+				logger.info(`[WS] Queued signal for ${signalData.symbol}`);
 
 				await this.processMessageQueue();
 			} catch (error) {
@@ -764,7 +764,7 @@ class TradingManager {
 				this.reconnect();
 			}
 
-			console.log("[HEALTH] System Status:", {
+			logger.info("[HEALTH] System Status:", {
 				wsConnected: this.connectionActive,
 				queueLength: this.messageQueue.length,
 				reconnectAttempts: this.reconnectAttempts,

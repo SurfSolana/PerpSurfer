@@ -136,9 +136,9 @@ export class ZetaClientWrapper {
 		Exchange.setUseAutoPriorityFee(false);
 		Exchange.updatePriorityFee(Math.floor(data.result.priorityFeeLevels.high * 1));
 
-		console.log("Fees: ", data.result.priorityFeeLevels);
-		console.log("Fee Level (high): ", data.result.priorityFeeLevels.high);
-		console.log("Exchange set to fee * 1:", Exchange._priorityFee);
+		logger.info("Fees: ", data.result.priorityFeeLevels);
+		logger.info("Fee Level (high): ", data.result.priorityFeeLevels.high);
+		logger.info("Exchange set to fee * 1:", Exchange._priorityFee);
 	}
 
 	isExchangeInitialized() {
@@ -150,7 +150,7 @@ export class ZetaClientWrapper {
 			await Exchange.updateState();
 			await this.client.updateState(true, true);
 			const positions = await this.client.getPositions(marketIndex);
-			// console.log("Position check:", {
+			// logger.info("Position check:", {
 			// 	marketIndex,
 			// 	hasPosition: !!positions[0],
 			// 	size: positions[0]?.size || 0,
@@ -175,7 +175,7 @@ export class ZetaClientWrapper {
 
 		await this.client.updateState(true, true);
 		const balance = Exchange.riskCalculator.getCrossMarginAccountState(this.client.account).balance;
-		console.log(`BALANCE:`, balance);
+		logger.info(`BALANCE:`, balance);
 
 		// Calculate size first to check if it's valid
 		const side = direction === "long" ? types.Side.BID : types.Side.ASK;
