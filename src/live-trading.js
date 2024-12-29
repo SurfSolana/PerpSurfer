@@ -273,11 +273,10 @@ class SymbolTradingManager {
 		const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 		if (verifyPosition && verifyPosition.size !== 0) {
 			const actualDirection = verifyPosition.size > 0 ? "long" : "short";
-			logger.info(`[${this.symbol}] Found active ${actualDirection} position after operation`, {
+			logger.notify(`[${this.symbol}] Found active ${actualDirection} position after operation`, {
 				size: verifyPosition.size,
 				entryPrice: verifyPosition.costOfTrades ? (verifyPosition.costOfTrades / verifyPosition.size).toFixed(4) : "N/A",
 			});
-
 			this.currentDirection = actualDirection;
 			this.startPositionMonitor();
 		}
