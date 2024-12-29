@@ -11,10 +11,14 @@ dotenv.config();
 
 const MAX_RETRIES = 60;
 
+const VERIFY_TIMEOUT = 30000; // 30 seconds to verify position closed
+
+
 // Helper function to generate a random delay between 1-3 seconds
 function getRandomRetryDelay() {
   return Math.floor(Math.random() * (3000 - 1000 + 1)) + 1000;
 }
+
 
 async function retryOperation(operation, operationName) {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -32,7 +36,6 @@ async function retryOperation(operation, operationName) {
       } catch (error) {
           const isLastAttempt = attempt === MAX_RETRIES;
           
-          // Enhanced error logging
           const errorDetails = {
               attempt,
               error: error.message || error.toString(),
@@ -53,6 +56,7 @@ async function retryOperation(operation, operationName) {
       }
   }
 }
+
 
 async function validateAndInitialize(markets) {
     // Validate environment with single wallet configuration
@@ -130,44 +134,74 @@ async function openTestPosition(asset, direction) {
     }
 }
 
-async function closeTestPosition(asset, direction) {
-    logger.info(`Closing position: ${direction} ${asset}`);
-
-    // Using single wallet for all operations
-    const keypairPath = process.env.KEYPAIR_FILE_PATH;
-    logger.info(`Using wallet: ${keypairPath}`);
+async function verifyPositionClosed(zetaWrapper, asset, direction) {
+  const startTime = Date.now();
   
-    // Initialize Zeta client with single wallet
-    const zetaWrapper = new ZetaClientWrapper();
-    await zetaWrapper.initializeExchange([constants.Asset[asset]]);
-    await zetaWrapper.initialize(keypairPath);
-
-
-    
-    try {
-        // Wrap the position closing in the retry mechanism
-        const tx_close = await retryOperation(
-            async () => {
-                const result = await zetaWrapper.closePosition(direction, constants.Asset[asset]);
-                if (!result) {
-                    throw new Error("Failed to close position - no transaction signature returned");
-                }
-                return result;
-            },
-            `close ${direction} position for ${asset}`
-        );
-
-        if (tx_close) {
-            logger.info(`Successfully closed ${direction} position for ${asset}`);
-            process.exit(0);
-        } else {
-            throw new Error("Failed to close position - no transaction signature returned");
-        }
-    } catch (error) {
-        logger.error(`Failed to close ${direction} position for ${asset}`, error);
-        process.exit(1);
-    }
+  while (Date.now() - startTime < VERIFY_TIMEOUT) {
+      try {
+          const position = await zetaWrapper.getPosition(constants.Asset[asset]);
+          
+          if (!position || position.size === 0) {
+              logger.info(`Position closure verified for ${asset}`);
+              return true;
+          }
+          
+          // Wait 1 second before checking again
+          await utils.sleep(1000);
+      } catch (error) {
+          logger.error(`Error verifying position closure: ${error.message}`);
+          return false;
+      }
+  }
+  
+  logger.error(`Timed out waiting for position closure verification for ${asset}`);
+  return false;
 }
+
+async function closeTestPosition(asset, direction) {
+  logger.info(`Closing position: ${direction} ${asset}`);
+
+  const keypairPath = process.env.KEYPAIR_FILE_PATH;
+  logger.info(`Using wallet: ${keypairPath}`);
+
+  const zetaWrapper = new ZetaClientWrapper();
+  await zetaWrapper.initializeExchange([constants.Asset[asset]]);
+  await zetaWrapper.initialize(keypairPath);
+  
+  try {
+      // Only retry the actual close operation if it fails
+      const tx_close = await retryOperation(
+          async () => {
+              const result = await zetaWrapper.closePosition(direction, constants.Asset[asset]);
+              if (!result) {
+                  throw new Error("Failed to close position - no transaction signature returned");
+              }
+              return result;
+          },
+          `close ${direction} position for ${asset}`
+      );
+
+      if (tx_close) {
+          // Verify the position actually closed
+          const verified = await verifyPositionClosed(zetaWrapper, asset, direction);
+          
+          if (verified) {
+              logger.info(`Successfully closed and verified ${direction} position for ${asset}`);
+              process.exit(0);
+          } else {
+              logger.error(`Failed to verify position closure for ${asset}`);
+              process.exit(1);
+          }
+      } else {
+          throw new Error("Failed to close position - no transaction signature returned");
+      }
+  } catch (error) {
+      logger.error(`Failed to close ${direction} position for ${asset}`, error);
+      process.exit(1);
+  }
+}
+
+
 
 // Handle process termination gracefully
 process.on("SIGINT", () => {
