@@ -339,8 +339,8 @@ Opening ${direction} position:
     try {
       const settings = {
         leverageMultiplier: 4.8,
-        takeProfitPercentage: 0.025,
-        stopLossPercentage: 0.009,
+        takeProfitPercentage: 0.04,
+        stopLossPercentage: 0.02,
         trailingStopLoss: {
           progressThreshold: 0.6, // Updated default
           stopLossDistance:  0.4,
