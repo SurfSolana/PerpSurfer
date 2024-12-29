@@ -199,7 +199,6 @@ export class ZetaClientWrapper {
 			nativeLotSize,
 		} = await this.calculatePricesAndSize(side, marketIndex, balance, settings, "taker");
 
-
 		// Check for zero size before proceeding
 		if (nativeLotSize <= 0) {
 			logger.error("Order size too small:", {
@@ -209,7 +208,7 @@ export class ZetaClientWrapper {
 				estimatedPrice,
 				calculatedSize: positionSize,
 				minLotSize: decimalMinLotSize,
-        nativeLotSize: nativeLotSize,
+				nativeLotSize: nativeLotSize,
 			});
 			throw new Error("Order size too small, check leverage * balance compared to current price");
 		}
@@ -419,12 +418,62 @@ export class ZetaClientWrapper {
 					throw new Error("Invalid orderbook data");
 				}
 
-				// Find the first level with enough size
+				// Convert our required size to native lots
+				const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
+				const nativeMinLotSize = utils.getNativeMinLotSize(marketIndex);
+				const requiredLots = Math.round(orderSize / decimalMinLotSize);
+				const requiredNativeLots = requiredLots * nativeMinLotSize;
+
+				// Log full orderbook state for debugging
+				logger.info("Full Orderbook State:", {
+					market: assets.assetToName(marketIndex),
+					ourSize: {
+						raw: orderSize,
+						requiredLots,
+						requiredNativeLots,
+					},
+					asks: orderbook.asks.slice(0, 3).map((level) => ({
+						price: level.price.toFixed(4),
+						rawSize: level.size,
+						lots: Math.round(level.size / decimalMinLotSize),
+						nativeLots: Math.round(level.size / decimalMinLotSize) * nativeMinLotSize,
+					})),
+					bids: orderbook.bids.slice(0, 3).map((level) => ({
+						price: level.price.toFixed(4),
+						rawSize: level.size,
+						lots: Math.round(level.size / decimalMinLotSize),
+						nativeLots: Math.round(level.size / decimalMinLotSize) * nativeMinLotSize,
+					})),
+				});
+
+				// Find level with enough size
 				for (let i = 0; i < bookSide.length; i++) {
 					const level = bookSide[i];
-					if (level.size >= orderSize) {
+					const levelLots = Math.round(level.size / decimalMinLotSize);
+					const levelNativeLots = levelLots * nativeMinLotSize;
+
+					logger.info("Checking Level:", {
+						level: i,
+						price: level.price.toFixed(4),
+						rawSize: level.size,
+						lots: levelLots,
+						nativeLots: levelNativeLots,
+						requiredNativeLots,
+						sufficient: levelNativeLots >= requiredNativeLots,
+					});
+
+					if (levelNativeLots >= requiredNativeLots) {
 						const otherSidePrice = otherSide[0].price;
 						const spread = (Math.abs(level.price - otherSidePrice) / ((level.price + otherSidePrice) / 2)) * 100;
+
+						logger.info("Found Level:", {
+							levelIndex: i,
+							price: level.price.toFixed(4),
+							rawSize: level.size,
+							lots: levelLots,
+							nativeLots: levelNativeLots,
+							spread: spread.toFixed(4) + "%",
+						});
 
 						if (spread <= MAX_SPREAD) {
 							return {
