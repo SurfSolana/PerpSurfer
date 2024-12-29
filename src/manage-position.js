@@ -74,8 +74,8 @@ async function validateAndInitialize(markets) {
         connection,
         {
             skipPreflight: true,
-            preflightCommitment: "confirmed",
-            commitment: "confirmed",
+            preflightCommitment: "finalized",
+            commitment: "finalized",
         },
         25
     );

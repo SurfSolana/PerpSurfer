@@ -172,7 +172,7 @@ function log(level, message, metadata = {}) {
 	logger.log(level, message, metadata);
 
 	// Only accumulate messages for Telegram if it's configured and not error/debug/silly level
-	if (isTelegramConfigured && !['error', 'debug', 'silly'].includes(level)) {
+	if (isTelegramConfigured && !['debug', 'silly'].includes(level)) {
 		const formattedMetadata = formatMetadata(metadata);
 		const telegramMessage = `${message}${formattedMetadata}`;
 

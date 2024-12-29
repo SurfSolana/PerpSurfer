@@ -75,11 +75,11 @@ export class ZetaClientWrapper {
 			this.connection,
 			{
 				skipPreflight: true,
-				preflightCommitment: "confirmed",
-				commitment: "confirmed",
+				preflightCommitment: "finalized",
+				commitment: "finalized",
 			},
-			25,
-			true
+			20,
+			false
 			// this.connection,
 			// marketsArray,
 			// undefined,
@@ -106,7 +106,7 @@ export class ZetaClientWrapper {
 			this.client = await CrossClient.load(
 				this.connection, // connection: Connection,
 				this.wallet, // wallet: types.Wallet,
-				{ skipPreflight: true, preflightCommitment: "confirmed", commitment: "confirmed" }, // opts: ConfirmOptions = utils.defaultCommitment(),
+				{ skipPreflight: true, preflightCommitment: "finalized", commitment: "finalized" }, // opts: ConfirmOptions = utils.defaultCommitment(),
 				undefined, // callback
 				false, // throttle: boolean = false
 				undefined, // delegator : PublicKey = undefined,
@@ -314,8 +314,8 @@ Opening ${direction} position:
 				undefined,
 				{
 					skipPreflight: true,
-					preflightCommitment: "confirmed",
-					commitment: "confirmed",
+					preflightCommitment: "finalized",
+					commitment: "finalized",
 				},
 				false,
 				utils.getZetaLutArr()
@@ -393,8 +393,8 @@ Opening ${direction} position:
 				undefined,
 				{
 					skipPreflight: true,
-					preflightCommitment: "confirmed",
-					commitment: "confirmed",
+					preflightCommitment: "finalized",
+					commitment: "finalized",
 				},
 				false,
 				utils.getZetaLutArr()
@@ -412,7 +412,7 @@ Opening ${direction} position:
 		try {
 			const { bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
 
-			const slippage = 0.0001; // 1 tick
+			const slippage = .001; // 10 ticks
 
 			// To ensure immediate fills when closing:
 			// ASK side (selling to close long): go 1 tick BELOW bestBid to guarantee fill
@@ -543,7 +543,7 @@ Opening ${direction} position:
 
 		const { markPrice, bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
 
-		const slippage = 0.0001; // 1 tick
+		const slippage = 0.001; // 10 ticks
 
 		// To ensure immediate fills:
 		// BID side (buying to open long): go 1 tick ABOVE bestAsk
@@ -693,10 +693,11 @@ Opening ${direction} position:
 			nativeLotSize,
 			side,
 			{
-				orderType: types.OrderType.FILLORKILL,
+				orderType: types.OrderType.LIMIT,
 				tifOptions: {
 					expiryOffset: 30,
 				},
+        tag: constants.DEFAULT_ORDER_TAG,
 			}
 		);
 	}
@@ -708,7 +709,7 @@ Opening ${direction} position:
 			nativeLotSize,
 			side,
 			{
-				orderType: types.OrderType.FILLORKILL,
+				orderType: types.OrderType.LIMIT,
 				tifOptions: {
 					expiryOffset: 30,
 				},
@@ -731,7 +732,7 @@ Opening ${direction} position:
 			utils.convertDecimalToNativeInteger(takeProfitTrigger),
 			triggerDirection,
 			new BN(0),
-			types.OrderType.FILLORKILL,
+			types.OrderType.LIMIT,
 			triggerOrderBit,
 			{
 				reduceOnly: true,

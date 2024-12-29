@@ -311,8 +311,8 @@ Opening ${direction} position:
         undefined,
         {
           skipPreflight: true,
-          preflightCommitment: "confirmed",
-          commitment: "confirmed",
+          preflightCommitment: "finalized",
+          commitment: "finalized",
         },
         false,
         utils.getZetaLutArr()
