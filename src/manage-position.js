@@ -45,6 +45,7 @@ async function retryOperation(operation, operationName) {
 				errorMessage.includes("Order size too small"); // Our early size check
 
 			if (isNonRetryable) {
+        logger.notify(`[CRITICAL] Non-retryable error encountered: ${errorMessage} - ${operationName}`);
 				logger.error(`${operationName} failed with non-retryable error: ${errorMessage}`);
 				process.exit(1);
 			}
@@ -59,6 +60,7 @@ async function retryOperation(operation, operationName) {
 			logger.error(`${operationName} attempt ${attempt} failed:`, errorDetails);
 
 			if (isLastAttempt) {
+        logger.notify(`[CRITICAL] Operation failed after maximum ${MAX_RETRIES} attempts - ${operationName}`);
 				logger.error(`${operationName} failed after ${MAX_RETRIES} attempts`);
 				throw error;
 			}
@@ -101,7 +103,8 @@ async function validateAndInitialize(markets) {
 }
 
 async function openTestPosition(asset, direction) {
-	logger.info(`Opening position: ${direction} ${asset}`);
+
+  logger.notify(`[${asset}] Opening ${direction} position`);
 
 	// Using single wallet for all operations
 	const keypairPath = process.env.KEYPAIR_FILE_PATH;
@@ -123,7 +126,7 @@ async function openTestPosition(asset, direction) {
 		}, `open ${direction} position for ${asset}`);
 
 		if (tx_open) {
-			logger.info(`Successfully opened ${direction} position for ${asset}`);
+      logger.notify(`[${asset}] Successfully opened ${direction} position`);
 			process.exit(0);
 		} else {
 			throw new Error("Failed to open position - no transaction signature returned");
@@ -171,7 +174,7 @@ async function verifyPositionClosed(zetaWrapper, asset, direction) {
 }
 
 async function closeTestPosition(asset, direction) {
-	logger.info(`Closing position: ${direction} ${asset}`);
+  logger.notify(`[${asset}] Closing ${direction} position`);
 
 	const keypairPath = process.env.KEYPAIR_FILE_PATH;
 	logger.info(`Using wallet: ${keypairPath}`);
@@ -195,7 +198,7 @@ async function closeTestPosition(asset, direction) {
 			const verified = await verifyPositionClosed(zetaWrapper, asset, direction);
 
 			if (verified) {
-				logger.info(`Successfully closed and verified ${direction} position for ${asset}`);
+        logger.notify(`[${asset}] Successfully closed and verified ${direction} position`);
 				process.exit(0);
 			} else {
 				logger.error(`Failed to verify position closure for ${asset}`);

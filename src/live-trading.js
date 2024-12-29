@@ -175,6 +175,9 @@ class SymbolTradingManager {
 				const isExtremeFear = marketConditions.sentiment === "Extreme Fear";
 
 				if ((isExtremeGreed && !isLongPosition) || (isExtremeFear && isLongPosition)) {
+
+          logger.notify(`[${this.symbol}] Position closure triggered by extreme market sentiment - ${marketConditions.sentiment}`);
+
 					logger.info(`[${this.symbol}] Closing position due to extreme opposite market sentiment`, {
 						positionType: isLongPosition ? "LONG" : "SHORT",
 						marketSentiment: marketConditions.sentiment,
@@ -186,12 +189,13 @@ class SymbolTradingManager {
 					if (closed) {
 						logger.info(`[${this.symbol}] Position closed due to extreme market conditions`);
 
+            logger.notify(`[${this.symbol}] Position successfully closed due to market sentiment`);
+
 						if ((isExtremeGreed && signalData.signal === 1) || (isExtremeFear && signalData.signal === -1)) {
 							const newDirection = signalData.signal === 1 ? "long" : "short";
-							logger.info(
+							logger.notify(
 								`[${this.symbol}] Opening ${newDirection} position after closure due to matching signal and market sentiment`
 							);
-
 							try {
 								await execAsync(`node src/manage-position.js open ${this.symbol} ${newDirection}`, {
 									maxBuffer: 1024 * 1024 * 32,
@@ -505,6 +509,11 @@ class SymbolTradingManager {
 					});
 
 					if (this.thresholdHits >= CONFIG.position.thresholdHitCount) {
+						logger.notify(
+							`[${this.symbol}] Position closure triggered by pullback threshold - Progress: ${(progressPercent * 100).toFixed(
+								2
+							)}%, High: ${(this.highestProgress * 100).toFixed(2)}%`
+						);
 						logger.info(`[${this.symbol}] Attempting to close position:`, {
 							reason: "Dynamic pullback threshold hit",
 							hits: this.thresholdHits,
@@ -516,6 +525,9 @@ class SymbolTradingManager {
 						const closed = await this.closePosition("Dynamic pullback threshold hit");
 						if (!closed) {
 							logger.warn(`[${this.symbol}] Pullback closure failed - will retry on next monitor cycle`);
+						}
+						if (closed) {
+							logger.notify(`[${this.symbol}] Position successfully closed from pullback threshold`);
 						}
 						return;
 					}
