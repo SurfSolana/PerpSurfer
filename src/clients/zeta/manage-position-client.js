@@ -31,30 +31,8 @@ export class ZetaClientWrapper {
 	constructor() {
 		this.client = null;
 		this.connection = null;
-		this.connection_2 = null;
-		this.connection_3 = null;
 		this.wallet = null;
 		this.activeMarket = constants.Asset.SOL;
-		this.use_db_settings = true;
-
-		this.priorityFees = null;
-		this.priorityFeeMultiplier = 10;
-		this.currentPriorityFee = 5_000;
-
-		this.monitoringInterval = null;
-
-		this.positionState = {
-			isMonitoring: false,
-			isAdjusting: false,
-			marketIndex: null,
-			position: null,
-			orders: {
-				takeProfit: null,
-				stopLoss: null,
-			},
-			entryPrice: null,
-			hasAdjustedStopLoss: false,
-		};
 	}
 
 	roundToTickSize(price) {
@@ -64,7 +42,9 @@ export class ZetaClientWrapper {
 
 	async initializeExchange(markets) {
 		// Initialize connection and exchange
-		this.connection = new Connection(process.env.RPC_TRADINGBOT);
+		this.connection = new Connection(process.env.RPC_TRADINGBOT, {
+			commitment: "finalized",
+		});
 
 		// Create set of markets to load
 		const marketsToLoad = new Set([constants.Asset.SOL, ...markets]);
@@ -170,11 +150,11 @@ export class ZetaClientWrapper {
 			await Exchange.updateState();
 			await this.client.updateState(true, true);
 			const positions = await this.client.getPositions(marketIndex);
-			console.log("Position check:", {
-				marketIndex,
-				hasPosition: !!positions[0],
-				size: positions[0]?.size || 0,
-			});
+			// console.log("Position check:", {
+			// 	marketIndex,
+			// 	hasPosition: !!positions[0],
+			// 	size: positions[0]?.size || 0,
+			// });
 			return positions[0] || null;
 		} catch (error) {
 			logger.error("Error getting position:", error);
@@ -185,52 +165,26 @@ export class ZetaClientWrapper {
 	getCalculatedMarkPrice(asset = this.activeMarket) {
 		const { markPrice } = this.getMarkPriceAndSpread(asset);
 		return markPrice;
-
-		/* 12/20/24 replacing functionality with forwarded value
-    ********************************************************
-		try {
-			Exchange.getPerpMarket(asset).forceFetchOrderbook();
-			const orderBook = Exchange.getOrderbook(asset);
-
-			if (!orderBook?.asks?.[0]?.price || !orderBook?.bids?.[0]?.price) {
-				throw new Error("Invalid orderbook data");
-			}
-
-			return Number((orderBook.asks[0].price + orderBook.bids[0].price) / 2);
-		} catch (error) {
-			logger.error("Error getting calculated mark price:", error);
-			throw error;
-		}
-    */
-	}
-
-	async cancelAllTriggerOrders(marketIndex) {
-		await this.updatePriorityFees();
-
-		await Exchange.updateState();
-
-		await this.client.updateState(true, true);
-
-		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
-
-		if (openTriggerOrders && openTriggerOrders.length > 0) {
-			logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
-			const txids = await this.client.cancelAllTriggerOrders(marketIndex);
-			logger.info("Trigger Orders Cancelled.");
-			return txids;
-		} else {
-			logger.info(`No Trigger Orders found.`);
-		}
 	}
 
 	async openPosition(direction, marketIndex = this.activeMarket, makerOrTaker = "taker") {
 		logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
 
 		const settings = this.fetchSettings();
-
 		logger.info(`Using settings:`, settings);
 
 		await this.client.updateState(true, true);
+		const balance = Exchange.riskCalculator.getCrossMarginAccountState(this.client.account).balance;
+		console.log(`BALANCE:`, balance);
+
+		// Calculate size first to check if it's valid
+		const side = direction === "long" ? types.Side.BID : types.Side.ASK;
+
+		// Early size calculation
+		const estimatedPrice = this.getCalculatedMarkPrice(marketIndex);
+		const positionSize = (balance * settings.leverageMultiplier) / estimatedPrice;
+		const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
+		const lotSize = Math.floor(positionSize / decimalMinLotSize);
 
 		let transaction = new Transaction().add(
 			ComputeBudgetProgram.setComputeUnitLimit({
@@ -238,74 +192,34 @@ export class ZetaClientWrapper {
 			})
 		);
 
-		const balance = Exchange.riskCalculator.getCrossMarginAccountState(this.client.account).balance;
-
-		console.log(`BALANCE:`, balance);
-
-		const side = direction === "long" ? types.Side.BID : types.Side.ASK;
-
-		const { currentPrice, adjustedPrice, positionSize, nativeLotSize } = await this.calculatePricesAndSize(
-			side,
-			marketIndex,
-			balance,
-			settings,
-			"taker"
-		);
-
-  /*
-		const { takeProfitPrice, takeProfitTrigger, stopLossPrice, stopLossTrigger } = this.calculateTPSLPrices(
-			direction,
+		const {
+			currentPrice,
 			adjustedPrice,
-			settings
-		);
+			positionSize: finalPositionSize,
+			nativeLotSize,
+		} = await this.calculatePricesAndSize(side, marketIndex, balance, settings, "taker");
 
-		logger.info(`
-Opening ${direction} position:
-------------------------------
-    Take Profit ⟶ $${takeProfitPrice.toFixed(4)}
-                      ↑ 
-    TP Trigger ⟶ $${takeProfitTrigger.toFixed(4)}
-                      ↑ 
--------- Entry ⟶ $${adjustedPrice.toFixed(4)} -----
-                      ↓
-    SL Trigger ⟶ $${stopLossTrigger.toFixed(4)}
-                      ↓
-      SL Price ⟶ $${stopLossPrice.toFixed(4)}
-------------------------------`);
-*/
+
+		// Check for zero size before proceeding
+		if (nativeLotSize <= 0) {
+			logger.error("Order size too small:", {
+				market: assets.assetToName(marketIndex),
+				balance,
+				leverage: settings.leverageMultiplier,
+				estimatedPrice,
+				calculatedSize: positionSize,
+				minLotSize: decimalMinLotSize,
+        nativeLotSize: nativeLotSize,
+			});
+			throw new Error("Order size too small, check leverage * balance compared to current price");
+		}
+
 		await this.updatePriorityFees();
-
 		await Exchange.updateState();
-
 		await this.client.updateState(true, true);
 
-		// const triggerBit_TP = this.client.findAvailableTriggerOrderBit();
-		// const triggerBit_SL = this.client.findAvailableTriggerOrderBit(triggerBit_TP + 1);
-
 		const mainOrderIx = this.createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, "taker");
-		
-		/*
-		const tpOrderIx = this.createTPOrderInstruction(
-			direction,
-			marketIndex,
-			takeProfitPrice,
-			takeProfitTrigger,
-			nativeLotSize,
-			triggerBit_TP
-		);
-		const slOrderIx = this.createSLOrderInstruction(
-			direction,
-			marketIndex,
-			stopLossPrice,
-			stopLossTrigger,
-			nativeLotSize,
-			triggerBit_SL
-		);
-*/
-
 		transaction.add(mainOrderIx);
-		// transaction.add(tpOrderIx);
-		// transaction.add(slOrderIx);
 
 		try {
 			const txid = await utils.processTransaction(
@@ -324,36 +238,33 @@ Opening ${direction} position:
 			logger.info(`Transaction sent successfully. txid: ${txid}`);
 			return txid;
 		} catch (error) {
-			// Categorize and enhance the error
 			const errorContext = {
 				direction,
 				asset: assets.assetToName(marketIndex),
 				type: error.name,
 				details: error.message,
-				code: error.code, // If provided by SDK
+				code: error.code,
 				timestamp: new Date().toISOString(),
 			};
 
-			// Log a single, comprehensive error message
 			logger.error(`Failed to open ${direction} position for ${assets.assetToName(marketIndex)}`, errorContext);
+			throw error;
 		}
 	}
 
 	async closePosition(direction, marketIndex) {
-
 		await this.client.updateState(true, true);
 
-		let position = await this.client.getPositions(marketIndex); // <- RIGHT WAY
+		let positions = await this.client.getPositions(marketIndex);
 
-		console.log(position);
-
-		if (position) {
-			position = position[0];
-			logger.info(`Closing position for ${assets.assetToName(marketIndex)}`, position);
-		} else {
+		// Check for empty array or undefined first position
+		if (!positions || !positions.length || !positions[0]) {
 			logger.info(`No position to close for ${assets.assetToName(marketIndex)}`);
-			return;
+			return { status: "NO_POSITION" }; // Return specific object instead of undefined
 		}
+
+		const position = positions[0];
+		logger.info(`Closing position for ${assets.assetToName(marketIndex)}`, position);
 
 		// Calculate position size
 		const rawPositionSize = Math.abs(position.size);
@@ -408,76 +319,6 @@ Opening ${direction} position:
 		}
 	}
 
-	async getClosePrice(marketIndex, side) {
-		try {
-			const { bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
-
-			const slippage = .001; // 10 ticks
-
-			// To ensure immediate fills when closing:
-			// ASK side (selling to close long): go 1 tick BELOW bestBid to guarantee fill
-			// BID side (buying to close short): go 1 tick ABOVE bestAsk to guarantee fill
-			const closePrice =
-				side === types.Side.ASK
-					? bestBid - slippage // Selling: price below BID
-					: bestAsk + slippage; // Buying: price above ASK
-
-			logger.info("Close price calculation:", {
-				market: assets.assetToName(marketIndex),
-				side: side === types.Side.BID ? "BUY" : "SELL",
-				spread: spread.toFixed(4) + "%",
-				bestAsk: bestAsk.toFixed(4),
-				bestBid: bestBid.toFixed(4),
-				closePrice: closePrice.toFixed(4),
-			});
-
-			return closePrice;
-		} catch (error) {
-			logger.error("Error calculating close price:", error);
-			throw error;
-		}
-	}
-
-	// 12/20/24 replaced with above
-	// ************************************
-	// getClosePrice(marketIndex, side) {
-	// 	// Get orderbook data
-	// 	Exchange.getPerpMarket(marketIndex).forceFetchOrderbook();
-	// 	const orderbook = Exchange.getOrderbook(marketIndex);
-
-	// 	if (!orderbook?.asks?.[0]?.price || !orderbook?.bids?.[0]?.price) {
-	// 		throw new Error("Invalid orderbook data for price calculation");
-	// 	}
-
-	// 	// Calculate current price based on side
-	// 	const currentPrice = side === types.Side.BID ? orderbook.asks[0].price : orderbook.bids[0].price;
-
-	// 	const makerOrTaker = "taker";
-
-	// 	// Calculate adjusted price with slippage
-	// 	const slippage = 0.0001;
-	// 	const closePrice = this.roundToTickSize(
-	// 		makerOrTaker === "maker"
-	// 			? side === types.Side.BID
-	// 				? currentPrice + slippage
-	// 				: currentPrice - slippage
-	// 			: side === types.Side.BID
-	// 			? currentPrice * (1 + slippage * 5)
-	// 			: currentPrice * (1 - slippage * 5)
-	// 	);
-
-	// 	return closePrice;
-	// }
-
-	getTriggerOrders(marketIndex = this.activeMarket) {
-		try {
-			return this.client.getTriggerOrders(marketIndex);
-		} catch (error) {
-			logger.error("Error getting trigger orders:", error);
-			throw error;
-		}
-	}
-
 	fetchSettings() {
 		const settings = {
 			leverageMultiplier: 4,
@@ -491,49 +332,119 @@ Opening ${direction} position:
 		return settings;
 	}
 
-	calculateTPSLPrices(direction, price, settings) {
-		// if (!direction || !price || !settings) {
-		// 	throw new Error("Invalid inputs for TP/SL calculation");
-		// }
-
-		const { takeProfitPercentage, stopLossPercentage } = settings;
-		const isLong = direction === "long";
-
-		const takeProfitPrice = this.roundToTickSize(
-			isLong ? price + price * takeProfitPercentage : price - price * takeProfitPercentage
+	createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
+		return this.client.createPlacePerpOrderInstruction(
+			marketIndex,
+			utils.convertDecimalToNativeInteger(adjustedPrice),
+			nativeLotSize,
+			side,
+			{
+				orderType: types.OrderType.FILLORKILL,
+				tifOptions: {
+					expiryOffset: 30,
+				},
+				tag: constants.DEFAULT_ORDER_TAG,
+			}
 		);
+	}
 
-		const takeProfitTrigger = this.roundToTickSize(
-			isLong ? price + (takeProfitPrice - price) * 0.95 : price - (price - takeProfitPrice) * 0.95
+	createCloseOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
+		return this.client.createPlacePerpOrderInstruction(
+			marketIndex,
+			utils.convertDecimalToNativeInteger(adjustedPrice),
+			nativeLotSize,
+			side,
+			{
+				orderType: types.OrderType.FILLORKILL,
+				tifOptions: {
+					expiryOffset: 30,
+				},
+				reduceOnly: true,
+				tag: constants.DEFAULT_ORDER_TAG,
+			}
 		);
+	}
 
-		const stopLossPrice = this.roundToTickSize(isLong ? price - price * stopLossPercentage : price + price * stopLossPercentage);
+	async getClosePrice(marketIndex, side) {
+		try {
+			const position = await this.getPosition(marketIndex);
+			if (!position) {
+				throw new Error("No position found to close");
+			}
 
-		const stopLossTrigger = this.roundToTickSize(
-			isLong ? price - (price - stopLossPrice) * 0.95 : price + (stopLossPrice - price) * 0.95
-		);
+			const positionSize = Math.abs(position.size);
+			const { bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex, positionSize, side);
 
-		console.log("Calculated TP/SL Prices:", {
-			direction,
-			entryPrice: price.toFixed(4),
-			takeProfit: {
-				price: takeProfitPrice.toFixed(4),
-				trigger: takeProfitTrigger.toFixed(4),
-				percentage: (takeProfitPercentage * 100).toFixed(2) + "%",
-			},
-			stopLoss: {
-				price: stopLossPrice.toFixed(4),
-				trigger: stopLossTrigger.toFixed(4),
-				percentage: (stopLossPercentage * 100).toFixed(2) + "%",
-			},
-		});
+			const slippage = 0.001; // 10 ticks
 
-		return {
-			takeProfitPrice,
-			takeProfitTrigger,
-			stopLossPrice,
-			stopLossTrigger,
-		};
+			const closePrice =
+				side === types.Side.ASK
+					? bestBid - slippage // Selling: price below BID
+					: bestAsk + slippage; // Buying: price above ASK
+
+			logger.info("Close price calculation:", {
+				market: assets.assetToName(marketIndex),
+				side: side === types.Side.BID ? "BUY" : "SELL",
+				spread: spread.toFixed(4) + "%",
+				bestAsk: bestAsk.toFixed(4),
+				bestBid: bestBid.toFixed(4),
+				closePrice: closePrice.toFixed(4),
+				positionSize,
+			});
+
+			return closePrice;
+		} catch (error) {
+			logger.error("Error calculating close price:", error);
+			throw error;
+		}
+	}
+
+	async waitForAcceptableSpread(marketIndex, orderSize, side, maxWaitTime = 30000, pollInterval = 1000) {
+		const startTime = Date.now();
+		const MAX_SPREAD = 0.5;
+		let attempts = 0;
+
+		while (Date.now() - startTime < maxWaitTime) {
+			try {
+				Exchange.updateState();
+				Exchange.getPerpMarket(marketIndex).forceFetchOrderbook();
+				const orderbook = Exchange.getOrderbook(marketIndex);
+				attempts++;
+
+				// Get the relevant side of the book
+				const bookSide = side === types.Side.BID ? orderbook.asks : orderbook.bids;
+				const otherSide = side === types.Side.BID ? orderbook.bids : orderbook.asks;
+
+				if (!bookSide || bookSide.length === 0 || !otherSide || otherSide.length === 0) {
+					throw new Error("Invalid orderbook data");
+				}
+
+				// Find the first level with enough size
+				for (let i = 0; i < bookSide.length; i++) {
+					const level = bookSide[i];
+					if (level.size >= orderSize) {
+						const otherSidePrice = otherSide[0].price;
+						const spread = (Math.abs(level.price - otherSidePrice) / ((level.price + otherSidePrice) / 2)) * 100;
+
+						if (spread <= MAX_SPREAD) {
+							return {
+								markPrice: (level.price + otherSidePrice) / 2,
+								bestAsk: side === types.Side.BID ? level.price : otherSidePrice,
+								bestBid: side === types.Side.BID ? otherSidePrice : level.price,
+								spread,
+							};
+						}
+					}
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, pollInterval));
+			} catch (error) {
+				logger.error("Error checking spread and liquidity:", error);
+				throw error;
+			}
+		}
+
+		throw new Error(`Unable to find acceptable spread and liquidity after ${maxWaitTime / 1000}s`);
 	}
 
 	async calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "taker") {
@@ -541,92 +452,44 @@ Opening ${direction} position:
 			throw new Error("Invalid inputs for price and size calculation");
 		}
 
-		const { markPrice, bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex);
-
-		const slippage = 0.001; // 10 ticks
-
-		// To ensure immediate fills:
-		// BID side (buying to open long): go 1 tick ABOVE bestAsk
-		// ASK side (selling to open short): go 1 tick BELOW bestBid
-		const adjustedPrice =
-			side === types.Side.BID
-				? bestAsk + slippage // Buying: price above ASK
-				: bestBid - slippage; // Selling: price below BID
-
-		const positionSize = (balance * settings.leverageMultiplier) / adjustedPrice;
+		// Calculate initial position size
+		const estimatedPrice = this.getCalculatedMarkPrice(marketIndex);
+		const positionSize = (balance * settings.leverageMultiplier) / estimatedPrice;
 		const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
 		const lotSize = Math.floor(positionSize / decimalMinLotSize);
 		const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
+		const actualPositionSize = lotSize * decimalMinLotSize;
 
-		logger.info(`Lots Debug:`, {
+		// Get market data considering the order size
+		const { markPrice, bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex, actualPositionSize, side);
+
+		const slippage = 0.001; // 10 ticks
+
+		// Use the price from the appropriate order book level
+		const adjustedPrice = side === types.Side.BID ? bestAsk + slippage : bestBid - slippage;
+
+		logger.info(`Order Sizing:`, {
 			currentPrice: markPrice,
 			bestAsk: bestAsk.toFixed(4),
 			bestBid: bestBid.toFixed(4),
 			adjustedPrice: adjustedPrice.toFixed(4),
 			side: side === types.Side.BID ? "BUY" : "SELL",
 			spread: spread.toFixed(4) + "%",
-			positionSize: positionSize,
-			decimalMinLotSize: decimalMinLotSize,
-			lotSize: lotSize,
-			nativeLotSize: nativeLotSize,
+			positionSize: actualPositionSize,
+			lotSize,
+			nativeLotSize,
 		});
 
 		return {
 			currentPrice: markPrice,
 			adjustedPrice,
-			positionSize,
+			positionSize: actualPositionSize,
 			nativeLotSize,
 			spread,
 		};
 	}
 
-	/* 12/20/24 replaced with above
-  *********************************
-	calculatePricesAndSize(side, marketIndex, balance, settings, makerOrTaker = "maker") {
-		// if (side === undefined || side === null || !marketIndex || !balance || !settings) {
-		// 	throw new Error("Invalid inputs for price and size calculation");
-		// }
-
-		Exchange.getPerpMarket(marketIndex).forceFetchOrderbook();
-		const orderbook = Exchange.getOrderbook(marketIndex);
-
-		if (!orderbook?.asks?.[0]?.price || !orderbook?.bids?.[0]?.price) {
-			throw new Error("Invalid orderbook data for price calculation");
-		}
-
-		const currentPrice = side === types.Side.BID ? orderbook.asks[0].price : orderbook.bids[0].price;
-		const slippage = 0.0001;
-
-		const adjustedPrice =
-			makerOrTaker === "maker"
-				? side === types.Side.BID
-					? currentPrice + slippage
-					: currentPrice - slippage
-				: side === types.Side.BID
-				? currentPrice * (1 + slippage * 5)
-				: currentPrice * (1 - slippage * 5);
-
-		const positionSize = (balance * settings.leverageMultiplier) / currentPrice;
-		const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
-		const lotSize = Math.round(positionSize / decimalMinLotSize);
-		const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
-
-		logger.info(`Lots Debug:`, {
-			positionSize,
-			decimalMinLotSize,
-			lotSize,
-			nativeLotSize
-		});
-
-		return {
-			currentPrice,
-			adjustedPrice,
-			positionSize,
-			nativeLotSize,
-		};
-	}
-  */
-
+	// Original getMarkPriceAndSpread - unchanged
 	getMarkPriceAndSpread(asset = this.activeMarket) {
 		try {
 			Exchange.updateState();
@@ -652,114 +515,5 @@ Opening ${direction} position:
 			logger.error("Error getting mark price and spread:", error);
 			throw error;
 		}
-	}
-
-	async waitForAcceptableSpread(marketIndex, maxWaitTime = 30000, pollInterval = 1000) {
-		const startTime = Date.now();
-		const MAX_SPREAD = 0.5;
-		let attempts = 0;
-
-		while (Date.now() - startTime < maxWaitTime) {
-			try {
-				const marketData = this.getMarkPriceAndSpread(marketIndex);
-				attempts++;
-
-				logger.info("Checking spread:", {
-					market: assets.assetToName(marketIndex),
-					spread: marketData.spread.toFixed(4) + "%",
-					maxSpread: MAX_SPREAD.toFixed(4) + "%",
-					attempt: attempts,
-					elapsedTime: ((Date.now() - startTime) / 1000).toFixed(1) + "s",
-				});
-
-				if (marketData.spread <= MAX_SPREAD) {
-					return marketData;
-				}
-
-				await new Promise((resolve) => setTimeout(resolve, pollInterval));
-			} catch (error) {
-				logger.error("Error checking spread:", error);
-				throw error;
-			}
-		}
-
-		throw new Error(`Unable to find acceptable spread after ${maxWaitTime / 1000}s`);
-	}
-
-	createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
-		return this.client.createPlacePerpOrderInstruction(
-			marketIndex,
-			utils.convertDecimalToNativeInteger(adjustedPrice),
-			nativeLotSize,
-			side,
-			{
-				orderType: types.OrderType.LIMIT,
-				tifOptions: {
-					expiryOffset: 30,
-				},
-        tag: constants.DEFAULT_ORDER_TAG,
-			}
-		);
-	}
-
-	createCloseOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
-		return this.client.createPlacePerpOrderInstruction(
-			marketIndex,
-			utils.convertDecimalToNativeInteger(adjustedPrice),
-			nativeLotSize,
-			side,
-			{
-				orderType: types.OrderType.LIMIT,
-				tifOptions: {
-					expiryOffset: 30,
-				},
-				reduceOnly: true,
-				tag: constants.DEFAULT_ORDER_TAG,
-			}
-		);
-	}
-
-	createTPOrderInstruction(direction, marketIndex, takeProfitPrice, takeProfitTrigger, nativeLotSize, triggerOrderBit = 0) {
-		const tp_side = direction === "long" ? types.Side.ASK : types.Side.BID;
-		const triggerDirection =
-			direction === "long" ? types.TriggerDirection.GREATERTHANOREQUAL : types.TriggerDirection.LESSTHANOREQUAL;
-
-		return this.client.createPlaceTriggerOrderIx(
-			marketIndex,
-			utils.convertDecimalToNativeInteger(takeProfitPrice),
-			nativeLotSize,
-			tp_side,
-			utils.convertDecimalToNativeInteger(takeProfitTrigger),
-			triggerDirection,
-			new BN(0),
-			types.OrderType.LIMIT,
-			triggerOrderBit,
-			{
-				reduceOnly: true,
-				tag: constants.DEFAULT_ORDER_TAG,
-			}
-		);
-	}
-
-	createSLOrderInstruction(direction, marketIndex, stopLossPrice, stopLossTrigger, nativeLotSize, triggerOrderBit = 1) {
-		const sl_side = direction === "long" ? types.Side.ASK : types.Side.BID;
-		const triggerDirection =
-			direction === "long" ? types.TriggerDirection.LESSTHANOREQUAL : types.TriggerDirection.GREATERTHANOREQUAL;
-
-		return this.client.createPlaceTriggerOrderIx(
-			marketIndex,
-			utils.convertDecimalToNativeInteger(stopLossPrice),
-			nativeLotSize,
-			sl_side,
-			utils.convertDecimalToNativeInteger(stopLossTrigger),
-			triggerDirection,
-			new BN(0),
-			types.OrderType.FILLORKILL,
-			triggerOrderBit,
-			{
-				reduceOnly: true,
-				tag: constants.DEFAULT_ORDER_TAG,
-			}
-		);
 	}
 }
