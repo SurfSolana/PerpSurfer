@@ -51,7 +51,7 @@ const CONFIG = {
 
 	// Trading assets configuration
 	// tradingAssets: ["SOL", "BTC", "ETH"],  ACTIVE_SYMBOLS
-	tradingAssets: ACTIVE_SYMBOLS,  
+	tradingAssets: ACTIVE_SYMBOLS,
 
 	// Required environment variables
 	requiredEnvVars: ["KEYPAIR_FILE_PATH", "WS_API_KEY", "RPC_TRADINGBOT"],
@@ -94,181 +94,190 @@ class SymbolTradingManager {
 		// Progress tracking properties
 		this.hasReachedThreshold = false;
 		this.highestProgress = 0;
+		this.lowestProgress = 0;
 		this.thresholdHits = 0;
 
 		// Position management state
 		this.isClosing = false;
 		this.currentDirection = null; // 'long' or 'short'
+
+		// Price tracking
+		this.highestPrice = 0;
+		this.lowestPrice = Infinity;
 	}
 
-  async processSignal(signalData) {
-    let currentPosition;
-    try {
-        currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
-    } catch (error) {
-        logger.error(`[${this.symbol}] Error getting position:`, {
-            error: error.message,
-            stack: error.stack
-        });
-        return;
-    }
-    
-    let marketConditions = {
-        sentiment: "NEUTRAL",
-        index: 50,
-        canOpenLong: true,
-        canOpenShort: true
-    };
+	async processSignal(signalData) {
+		let currentPosition;
+		try {
+			currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+		} catch (error) {
+			logger.error(`[${this.symbol}] Error getting position:`, {
+				error: error.message,
+				stack: error.stack,
+			});
+			return;
+		}
 
-    if (signalData.signal !== 0) {
-        try {
-            marketConditions = await getMarketSentiment();
-            
-            logger.info(`[${this.symbol}] Trading Analysis:`, {
-                incomingSignal: {
-                    type: signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL",
-                    value: signalData.signal,
-                },
-                marketSentiment: {
-                    sentiment: marketConditions.sentiment,
-                    index: marketConditions.index,
-                    allowsLong: marketConditions.canOpenLong,
-                    allowsShort: marketConditions.canOpenShort,
-                },
-                existingPosition:
-                    currentPosition && currentPosition.size !== 0
-                        ? {
-                                direction: currentPosition.size > 0 ? "LONG" : "SHORT",
-                                size: currentPosition.size,
-                                entryPrice: (currentPosition.costOfTrades / currentPosition.size).toFixed(4),
-                          }
-                        : "No position",
-                analysis:
-                    currentPosition && currentPosition.size !== 0
-                        ? `Have ${currentPosition.size > 0 ? "LONG" : "SHORT"} position while receiving ${
-                                signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL"
-                          } signal in ${marketConditions.sentiment} market`
-                        : `No position while receiving ${
-                                signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL"
-                          } signal in ${marketConditions.sentiment} market`,
-            });
-        } catch (error) {
-            logger.error(`[${this.symbol}] Error fetching market sentiment - continuing with default neutral conditions:`, {
-                error: error.message,
-                stack: error.stack,
-                signalData
-            });
-        }
-    }
+		let marketConditions = {
+			sentiment: "NEUTRAL",
+			index: 50,
+			canOpenLong: true,
+			canOpenShort: true,
+		};
 
-    if (currentPosition && currentPosition.size !== 0) {
-        const existingDirection = currentPosition.size > 0 ? "long" : "short";
+		if (signalData.signal !== 0) {
+			try {
+				marketConditions = await getMarketSentiment();
 
-        if (signalData.signal !== 0 && marketConditions.sentiment !== "NEUTRAL") {
-            const isLongPosition = currentPosition.size > 0;
-            const isExtremeGreed = marketConditions.sentiment === "Extreme Greed";
-            const isExtremeFear = marketConditions.sentiment === "Extreme Fear";
+				logger.info(`[${this.symbol}] Trading Analysis:`, {
+					incomingSignal: {
+						type: signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL",
+						value: signalData.signal,
+					},
+					marketSentiment: {
+						sentiment: marketConditions.sentiment,
+						index: marketConditions.index,
+						allowsLong: marketConditions.canOpenLong,
+						allowsShort: marketConditions.canOpenShort,
+					},
+					existingPosition:
+						currentPosition && currentPosition.size !== 0
+							? {
+									direction: currentPosition.size > 0 ? "LONG" : "SHORT",
+									size: currentPosition.size,
+									entryPrice: (currentPosition.costOfTrades / currentPosition.size).toFixed(4),
+							  }
+							: "No position",
+					analysis:
+						currentPosition && currentPosition.size !== 0
+							? `Have ${currentPosition.size > 0 ? "LONG" : "SHORT"} position while receiving ${
+									signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL"
+							  } signal in ${marketConditions.sentiment} market`
+							: `No position while receiving ${
+									signalData.signal === 1 ? "LONG" : signalData.signal === -1 ? "SHORT" : "NO SIGNAL"
+							  } signal in ${marketConditions.sentiment} market`,
+				});
+			} catch (error) {
+				logger.error(`[${this.symbol}] Error fetching market sentiment - continuing with default neutral conditions:`, {
+					error: error.message,
+					stack: error.stack,
+					signalData,
+				});
+			}
+		}
 
-            if ((isExtremeGreed && !isLongPosition) || (isExtremeFear && isLongPosition)) {
-                logger.info(`[${this.symbol}] Closing position due to extreme opposite market sentiment`, {
-                    positionType: isLongPosition ? "LONG" : "SHORT",
-                    marketSentiment: marketConditions.sentiment,
-                    reason: "Extreme opposite market sentiment"
-                });
+		if (currentPosition && currentPosition.size !== 0) {
+			const existingDirection = currentPosition.size > 0 ? "long" : "short";
 
-                const closed = await this.closePosition("Extreme opposite market sentiment");
-                
-                if (closed) {
-                    logger.info(`[${this.symbol}] Position closed due to extreme market conditions`);
-                    
-                    if ((isExtremeGreed && signalData.signal === 1) || (isExtremeFear && signalData.signal === -1)) {
-                        const newDirection = signalData.signal === 1 ? "long" : "short";
-                        logger.info(`[${this.symbol}] Opening ${newDirection} position after closure due to matching signal and market sentiment`);
-                        
-                        try {
-                            await execAsync(`node src/manage-position.js open ${this.symbol} ${newDirection}`, {
-                                maxBuffer: 1024 * 1024 * 32,
-                            });
-                        } catch (error) {
-                            // Log error but continue - we'll verify position state regardless
-                            logger.info(`[${this.symbol}] Position command completed with status info:`, {
-                                error: error.message
-                            });
-                        }
+			if (signalData.signal !== 0 && marketConditions.sentiment !== "NEUTRAL") {
+				const isLongPosition = currentPosition.size > 0;
+				const isExtremeGreed = marketConditions.sentiment === "Extreme Greed";
+				const isExtremeFear = marketConditions.sentiment === "Extreme Fear";
 
-                        logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying`);
-                        await utils.sleep(CONFIG.position.waitAfterAction);
+				if ((isExtremeGreed && !isLongPosition) || (isExtremeFear && isLongPosition)) {
+					logger.info(`[${this.symbol}] Closing position due to extreme opposite market sentiment`, {
+						positionType: isLongPosition ? "LONG" : "SHORT",
+						marketSentiment: marketConditions.sentiment,
+						reason: "Extreme opposite market sentiment",
+					});
 
-                        const newPosition = await this.zetaWrapper.getPosition(this.marketIndex);
-                        if (newPosition && newPosition.size !== 0) {
-                            this.currentDirection = newDirection;
-                            this.startPositionMonitor();
-                        }
-                    }
-                }
-                return;
-            }
-        }
+					const closed = await this.closePosition("Extreme opposite market sentiment");
 
-        if (!this.positionMonitorInterval) {
-            logger.info(`[${this.symbol}] Found unmonitored ${existingDirection} position during signal processing`, {
-                size: currentPosition.size,
-                entryPrice: (currentPosition.costOfTrades / currentPosition.size).toFixed(4),
-            });
+					if (closed) {
+						logger.info(`[${this.symbol}] Position closed due to extreme market conditions`);
 
-            this.currentDirection = existingDirection;
-            this.startPositionMonitor();
-        }
-        return;
-    }
+						if ((isExtremeGreed && signalData.signal === 1) || (isExtremeFear && signalData.signal === -1)) {
+							const newDirection = signalData.signal === 1 ? "long" : "short";
+							logger.info(
+								`[${this.symbol}] Opening ${newDirection} position after closure due to matching signal and market sentiment`
+							);
 
-    if (signalData.signal === 0) return;
+							try {
+								await execAsync(`node src/manage-position.js open ${this.symbol} ${newDirection}`, {
+									maxBuffer: 1024 * 1024 * 32,
+								});
+							} catch (error) {
+								// Log error but continue - we'll verify position state regardless
+								logger.info(`[${this.symbol}] Position command completed with status info:`, {
+									error: error.message,
+								});
+							}
 
-    const isLongSignal = signalData.signal === 1;
-    const direction = isLongSignal ? "long" : "short";
+							logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying`);
+							await utils.sleep(CONFIG.position.waitAfterAction);
 
-    if (marketConditions.sentiment !== "NEUTRAL" && 
-        ((isLongSignal && !marketConditions.canOpenLong) || (!isLongSignal && !marketConditions.canOpenShort))) {
-        logger.info(`[${this.symbol}] Skipping position due to market sentiment`, {
-            attemptedDirection: direction,
-            marketSentiment: marketConditions.sentiment,
-            sentimentIndex: marketConditions.index,
-        });
-        return;
-    }
+							const newPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+							if (newPosition && newPosition.size !== 0) {
+								this.currentDirection = newDirection;
+								this.startPositionMonitor();
+							}
+						}
+					}
+					return;
+				}
+			}
 
-    logger.info(`[${this.symbol}] Opening ${direction} position based on signal and market sentiment`, {
-        direction,
-        marketSentiment: marketConditions.sentiment,
-        sentimentIndex: marketConditions.index,
-    });
+			if (!this.positionMonitorInterval) {
+				logger.info(`[${this.symbol}] Found unmonitored ${existingDirection} position during signal processing`, {
+					size: currentPosition.size,
+					entryPrice: (currentPosition.costOfTrades / currentPosition.size).toFixed(4),
+				});
 
-    try {
-        await execAsync(`node src/manage-position.js open ${this.symbol} ${direction}`, {
-            maxBuffer: 1024 * 1024 * 32,
-        });
-    } catch (error) {
-        // Log error but continue - we'll verify position state regardless
-        logger.info(`[${this.symbol}] Position command completed with status info:`, {
-            error: error.message
-        });
-    }
+				this.currentDirection = existingDirection;
+				this.startPositionMonitor();
+			}
+			return;
+		}
 
-    logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying`);
-    await utils.sleep(CONFIG.position.waitAfterAction);
+		if (signalData.signal === 0) return;
 
-    const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
-    if (verifyPosition && verifyPosition.size !== 0) {
-        const actualDirection = verifyPosition.size > 0 ? "long" : "short";
-        logger.info(`[${this.symbol}] Found active ${actualDirection} position after operation`, {
-            size: verifyPosition.size,
-            entryPrice: verifyPosition.costOfTrades ? (verifyPosition.costOfTrades / verifyPosition.size).toFixed(4) : "N/A",
-        });
+		const isLongSignal = signalData.signal === 1;
+		const direction = isLongSignal ? "long" : "short";
 
-        this.currentDirection = actualDirection;
-        this.startPositionMonitor();
-    }
-}
+		if (
+			marketConditions.sentiment !== "NEUTRAL" &&
+			((isLongSignal && !marketConditions.canOpenLong) || (!isLongSignal && !marketConditions.canOpenShort))
+		) {
+			logger.info(`[${this.symbol}] Skipping position due to market sentiment`, {
+				attemptedDirection: direction,
+				marketSentiment: marketConditions.sentiment,
+				sentimentIndex: marketConditions.index,
+			});
+			return;
+		}
+
+		logger.info(`[${this.symbol}] Opening ${direction} position based on signal and market sentiment`, {
+			direction,
+			marketSentiment: marketConditions.sentiment,
+			sentimentIndex: marketConditions.index,
+		});
+
+		try {
+			await execAsync(`node src/manage-position.js open ${this.symbol} ${direction}`, {
+				maxBuffer: 1024 * 1024 * 32,
+			});
+		} catch (error) {
+			// Log error but continue - we'll verify position state regardless
+			logger.info(`[${this.symbol}] Position command completed with status info:`, {
+				error: error.message,
+			});
+		}
+
+		logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying`);
+		await utils.sleep(CONFIG.position.waitAfterAction);
+
+		const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+		if (verifyPosition && verifyPosition.size !== 0) {
+			const actualDirection = verifyPosition.size > 0 ? "long" : "short";
+			logger.info(`[${this.symbol}] Found active ${actualDirection} position after operation`, {
+				size: verifyPosition.size,
+				entryPrice: verifyPosition.costOfTrades ? (verifyPosition.costOfTrades / verifyPosition.size).toFixed(4) : "N/A",
+			});
+
+			this.currentDirection = actualDirection;
+			this.startPositionMonitor();
+		}
+	}
 	async closePosition(reason = "") {
 		if (this.isClosing) {
 			logger.info(`[${this.symbol}] Already attempting to close position`);
@@ -359,11 +368,6 @@ class SymbolTradingManager {
 
 			if (!currentPosition || currentPosition.size === 0) {
 				this.stopMonitoring();
-				// await execAsync(`node src/cancel-trigger-orders.js cancel ${this.symbol} ${this.currentDirection}`, {
-				// 	maxBuffer: 1024 * 1024 * 10,
-				// });
-				// logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before continuing`);
-				// await utils.sleep(CONFIG.position.waitAfterAction);
 				return;
 			}
 
@@ -372,31 +376,106 @@ class SymbolTradingManager {
 			const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
 			const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
 
+			// Track price extremes
+			this.highestPrice = Math.max(this.highestPrice || currentPrice, currentPrice);
+			this.lowestPrice = Math.min(this.lowestPrice === Infinity ? currentPrice : this.lowestPrice, currentPrice);
+
 			const { takeProfitPrice, stopLossPrice } = this.zetaWrapper.calculateTPSLPrices(direction, entryPrice, settings);
 
 			const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
+			const totalDistanceToSL = Math.abs(stopLossPrice - entryPrice);
 			const currentProgress = direction === "long" ? currentPrice - entryPrice : entryPrice - currentPrice;
-			const progressPercent = currentProgress / totalDistanceToTP;
+
+			// Calculate progress percentage relative to TP or SL
+			let progressPercent;
+			if (currentProgress >= 0) {
+				progressPercent = currentProgress / totalDistanceToTP;
+			} else {
+				// When in negative territory, show progress towards SL as negative percentage
+				progressPercent = currentProgress / totalDistanceToSL;
+			}
 
 			this.highestProgress = Math.max(this.highestProgress, progressPercent);
+			this.lowestProgress = Math.min(this.lowestProgress, progressPercent);
+
 			const dynamicPullbackThreshold = Math.max(0, this.highestProgress - CONFIG.position.pullbackAmount);
 
 			const stopLossHit = direction === "long" ? currentPrice <= stopLossPrice : currentPrice >= stopLossPrice;
 
+			// if (this.lastCheckedPrice !== currentPrice) {
+			// 	console.log(`[${this.symbol}] Position progress:`, {
+			// 		direction: direction === "long" ? "LONG" : "SHORT",
+			// 		entryPrice: entryPrice.toFixed(4),
+			// 		currentPrice: currentPrice.toFixed(4),
+			// 		highestPrice: this.highestPrice.toFixed(4),
+			// 		lowestPrice: this.lowestPrice.toFixed(4),
+			// 		stopLossPrice: stopLossPrice.toFixed(4),
+			// 		takeProfitPrice: takeProfitPrice.toFixed(4),
+			// 		currentProgress: (progressPercent * 100).toFixed(2) + "%",
+			// 		interpretation: progressPercent >= 0
+			// 			? `${(progressPercent * 100).toFixed(2)}% to TP`
+			// 			: `${(-progressPercent * 100).toFixed(2)}% to SL`,
+			// 		highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
+			// 		lowestProgress: (this.lowestProgress * 100).toFixed(2) + "%",
+			// 		hasReachedThreshold: this.hasReachedThreshold,
+			// 		pullbackThreshold: (dynamicPullbackThreshold * 100).toFixed(2) + "%",
+			// 		thresholdHits: this.thresholdHits,
+			// 		beyondTakeProfit: progressPercent > 1.0 ? `${((progressPercent - 1.0) * 100).toFixed(2)}% beyond TP` : "No",
+			// 	});
+			// 	this.lastCheckedPrice = currentPrice;
+			// }
+
+			// Inside monitorPosition() method:
 			if (this.lastCheckedPrice !== currentPrice) {
-				console.log(`[${this.symbol}] Position progress:`, {
-					direction: direction === "long" ? "LONG" : "SHORT",
-					entryPrice: entryPrice.toFixed(4),
-					currentPrice: currentPrice.toFixed(4),
-					stopLossPrice: stopLossPrice.toFixed(4),
-					takeProfitPrice: takeProfitPrice.toFixed(4),
-					progress: (progressPercent * 100).toFixed(2) + "%",
-					hasReachedThreshold: this.hasReachedThreshold,
-					highestProgress: (this.highestProgress * 100).toFixed(2) + "%",
-					pullbackThreshold: (dynamicPullbackThreshold * 100).toFixed(2) + "%",
-					thresholdHits: this.thresholdHits,
-					beyondTakeProfit: progressPercent > 1.0 ? `${((progressPercent - 1.0) * 100).toFixed(2)}% beyond TP` : "No",
-				});
+				// Helper function to create unified progress bar
+				const makeProgressBar = (percent, length = 40) => {
+					// Convert to 0-1 range where:
+					// 0 = stop loss
+					// 0.5 = entry
+					// 1 = take profit
+					const normalizedPercent = (percent + 1) / 2;
+					const position = Math.round(length * normalizedPercent);
+					const bar = "░".repeat(length);
+					return "│" + bar.slice(0, position) + "▓" + bar.slice(position + 1) + "│";
+				};
+
+				// Calculate direction emoji and color
+				const getDirectionEmoji = (percent) => {
+					if (percent > 0) {
+						return "🟢"; // Moving towards TP
+					} else if (percent < 0) {
+						return "🔴"; // Moving towards SL
+					}
+					return "⚪"; // At entry
+				};
+
+				const formatProgress = (percent) => {
+					if (percent >= 0) {
+						return `${(percent * 100).toFixed(1)}% to TP`;
+					} else {
+						return `${(-percent * 100).toFixed(1)}% to SL`;
+					}
+				};
+
+				// Calculate price change percentage
+				const priceChangePercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+				const priceChange = direction === "long" ? priceChangePercent : -priceChangePercent;
+
+				let output = `\n\n${this.symbol} ${direction === "long" ? "LONG" : "SHORT"}`;
+				output += `\nEntry: ${entryPrice.toFixed(2)} → Current: ${currentPrice.toFixed(2)} (${
+					priceChange >= 0 ? "+" : ""
+				}${priceChange.toFixed(2)}%)`;
+				output += "\n─────────────────────────────────────────────────────────";
+
+				// Single progress bar with SL/Entry/TP markers
+				output += "\nSL ─────────────── Entry ─────────────── TP";
+				output += `\n${makeProgressBar(progressPercent)} ${getDirectionEmoji(progressPercent)} ${formatProgress(
+					progressPercent
+				)}`;
+
+				output += "\n─────────────────────────────────────────────────────────";
+
+				console.log(output);
 				this.lastCheckedPrice = currentPrice;
 			}
 
@@ -456,6 +535,9 @@ class SymbolTradingManager {
 		}
 		this.hasReachedThreshold = false;
 		this.highestProgress = 0;
+		this.lowestProgress = 0;
+		this.highestPrice = 0;
+		this.lowestPrice = Infinity;
 		this.thresholdHits = 0;
 		this.isClosing = false;
 		this.currentDirection = null;

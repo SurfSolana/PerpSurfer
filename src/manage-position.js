@@ -13,12 +13,10 @@ const MAX_RETRIES = 60;
 
 const VERIFY_TIMEOUT = 30000; // 30 seconds to verify position closed
 
-
 // Helper function to generate a random delay between 1-3 seconds
 function getRandomRetryDelay() {
   return Math.floor(Math.random() * (3000 - 1000 + 1)) + 1000;
 }
-
 
 async function retryOperation(operation, operationName) {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
