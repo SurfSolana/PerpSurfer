@@ -1,4 +1,4 @@
-import { ZetaClientWrapper } from "./clients/zeta/live-trading-client.js";
+import { ZetaLiveTradingClientWrapper } from "./clients/zeta/live-trading-client.js";
 import { Connection } from "@solana/web3.js";
 import { ASSETS, SYMBOLS, ACTIVE_SYMBOLS } from "./config/config.js";
 import logger from "./utils/logger.js";
@@ -608,7 +608,7 @@ class TradingManager {
 			logger.info("[INIT] Exchange loaded successfully");
 
 			// Initialize ZetaWrapper
-			this.zetaWrapper = new ZetaClientWrapper();
+			this.zetaWrapper = new ZetaLiveTradingClientWrapper();
 			const marketIndices = symbols.map((symbol) => constants.Asset[symbol]);
 			await this.zetaWrapper.initialize(marketIndices, process.env.KEYPAIR_FILE_PATH);
 

@@ -1,9 +1,6 @@
-// manage-position.js
-
-import { ZetaClientWrapper } from "./clients/zeta/manage-position-client.js";
+import { ZetaManagePositionClientWrapper } from "./clients/zeta/manage-position-client.js";
 import { Connection } from "@solana/web3.js";
 import { constants, Network, Exchange, types, utils } from "@zetamarkets/sdk";
-import { PriorityFeeMethod, PriorityFeeSubscriber, fetchSolanaPriorityFee } from "@drift-labs/sdk";
 import dotenv from "dotenv";
 import logger from "./utils/logger.js";
 
@@ -111,7 +108,7 @@ async function openTestPosition(asset, direction) {
 	logger.info(`Using wallet: ${keypairPath}`);
 
 	// Initialize Zeta client with single wallet
-	const zetaWrapper = new ZetaClientWrapper();
+	const zetaWrapper = new ZetaManagePositionClientWrapper();
 	await zetaWrapper.initializeExchange([constants.Asset[asset]]);
 	await zetaWrapper.initialize(keypairPath);
 
@@ -179,7 +176,7 @@ async function closeTestPosition(asset, direction) {
 	const keypairPath = process.env.KEYPAIR_FILE_PATH;
 	logger.info(`Using wallet: ${keypairPath}`);
 
-	const zetaWrapper = new ZetaClientWrapper();
+	const zetaWrapper = new ZetaManagePositionClientWrapper();
 	await zetaWrapper.initializeExchange([constants.Asset[asset]]);
 	await zetaWrapper.initialize(keypairPath);
 

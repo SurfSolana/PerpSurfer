@@ -1,33 +1,12 @@
-import {
-	Wallet,
-	CrossClient,
-	Exchange,
-	Network,
-	Market,
-	instructions,
-	utils,
-	types,
-	assets,
-	constants,
-	events,
-} from "@zetamarkets/sdk";
-import {
-	PublicKey,
-	Connection,
-	Keypair,
-	Transaction,
-	TransactionMessage,
-	VersionedTransaction,
-	ComputeBudgetProgram,
-} from "@solana/web3.js";
+import { Wallet, CrossClient, Exchange, Network, Market, utils, types, assets, constants } from "@zetamarkets/sdk";
+import { PublicKey, Connection, Keypair, Transaction, ComputeBudgetProgram } from "@solana/web3.js";
 import fs from "fs";
 import dotenv from "dotenv";
 import logger from "../../utils/logger.js";
-import { BN } from "@drift-labs/sdk";
 
 dotenv.config();
 
-export class ZetaClientWrapper {
+export class ZetaManagePositionClientWrapper {
 	constructor() {
 		this.client = null;
 		this.connection = null;
@@ -93,7 +72,7 @@ export class ZetaClientWrapper {
 				true // useVersionedTxs: boolean = false,
 			);
 
-			logger.info("ZetaClientWrapper initialized successfully");
+			logger.info("ZetaManagePositionClientWrapper initialized successfully");
 		} catch (error) {
 			logger.error("Initialization error:", error);
 			throw error;
