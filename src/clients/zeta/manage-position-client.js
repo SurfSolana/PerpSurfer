@@ -37,16 +37,39 @@ export class ZetaManagePositionClientWrapper {
 				preflightCommitment: "finalized",
 				commitment: "finalized",
 			},
-			20,
-			false
+			25
+			// false
 			// this.connection,
 			// marketsArray,
 			// undefined,
 			// marketsArray
 		);
 
+		// Store original console methods
+		const originalLog = console.log;
+		const originalError = console.error;
+		const originalInfo = console.info;
+		const originalWarn = console.warn;
+		const originalDebug = console.debug;
+
+		// Disable all console output
+		console.log = () => {};
+		console.error = () => {};
+		console.info = () => {};
+		console.warn = () => {};
+		console.debug = () => {};
+
 		await Exchange.load(loadExchangeConfig);
+
+		// Restore console methods
+		console.log = originalLog;
+		console.error = originalError;
+		console.info = originalInfo;
+		console.warn = originalWarn;
+		console.debug = originalDebug;
+
 		logger.info("Exchange loaded successfully");
+
 	}
 
 	async initialize(keypairPath = null) {
@@ -317,11 +340,10 @@ export class ZetaManagePositionClientWrapper {
 			nativeLotSize,
 			side,
 			{
-				orderType: types.OrderType.FILLORKILL,
+				orderType: types.OrderType.LIMIT,
 				tifOptions: {
-					expiryOffset: 30,
+					expiryOffset: undefined,
 				},
-				tag: constants.DEFAULT_ORDER_TAG,
 			}
 		);
 	}
@@ -333,9 +355,9 @@ export class ZetaManagePositionClientWrapper {
 			nativeLotSize,
 			side,
 			{
-				orderType: types.OrderType.FILLORKILL,
+				orderType: types.OrderType.LIMIT,
 				tifOptions: {
-					expiryOffset: 30,
+					expiryOffset: undefined,
 				},
 				reduceOnly: true,
 				tag: constants.DEFAULT_ORDER_TAG,
@@ -353,7 +375,7 @@ export class ZetaManagePositionClientWrapper {
 			const positionSize = Math.abs(position.size);
 			const { bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex, positionSize, side);
 
-			const slippage = 0.001; // 10 ticks
+			const slippage = 0.0001; // 1 tick
 
 			const closePrice =
 				side === types.Side.ASK
@@ -491,7 +513,7 @@ export class ZetaManagePositionClientWrapper {
 		// Get market data considering the order size
 		const { markPrice, bestAsk, bestBid, spread } = await this.waitForAcceptableSpread(marketIndex, actualPositionSize, side);
 
-		const slippage = 0.001; // 10 ticks
+		const slippage = 0.0001; // 1 ticks
 
 		// Use the price from the appropriate order book level
 		const adjustedPrice = side === types.Side.BID ? bestAsk + slippage : bestBid - slippage;

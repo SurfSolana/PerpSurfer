@@ -93,7 +93,30 @@ async function validateAndInitialize(markets) {
 		25
 	);
 
+
+        // Store original console methods
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalInfo = console.info;
+        const originalWarn = console.warn;
+        const originalDebug = console.debug;
+
+        // Disable all console output
+        console.log = () => {};
+        console.error = () => {};
+        console.info = () => {};
+        console.warn = () => {};
+        console.debug = () => {};
+
 	await Exchange.load(loadExchangeConfig);
+
+        // Restore console methods
+        console.log = originalLog;
+        console.error = originalError;
+        console.info = originalInfo;
+        console.warn = originalWarn;
+        console.debug = originalDebug;
+
 	logger.info("Exchange loaded successfully");
 
 	return connection;
