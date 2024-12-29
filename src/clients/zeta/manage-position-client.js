@@ -340,7 +340,7 @@ export class ZetaManagePositionClientWrapper {
 			nativeLotSize,
 			side,
 			{
-				orderType: types.OrderType.LIMIT,
+				orderType: types.OrderType.FILLORKILL,
 				tifOptions: {
 					expiryOffset: undefined,
 				},
@@ -355,7 +355,7 @@ export class ZetaManagePositionClientWrapper {
 			nativeLotSize,
 			side,
 			{
-				orderType: types.OrderType.LIMIT,
+				orderType: types.OrderType.FILLORKILL,
 				tifOptions: {
 					expiryOffset: undefined,
 				},
