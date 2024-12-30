@@ -56,8 +56,8 @@ const CONFIG = {
 	// Required environment variables
 	requiredEnvVars: ["KEYPAIR_FILE_PATH", "WS_API_KEY", "RPC_TRADINGBOT"],
 
-	simpleTakeProfit: 4, // 6% take profit
-	simpleStopLoss: 2, // 3% stop loss
+	simpleTakeProfit: 5, // 6% take profit
+	simpleStopLoss: 3, // 3% stop loss
 };
 
 function validateConfig() {
@@ -858,6 +858,7 @@ class TradingManager {
 
 		this.ws.on("message", async (data) => {
 			try {
+
 				const signalData = JSON.parse(data.toString());
 
 				if (signalData.type === "connection") {
