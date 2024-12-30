@@ -80,7 +80,7 @@ async function verifyPositionOpened(zetaWrapper, asset, direction) {
 			const position = await zetaWrapper.getPosition(constants.Asset[asset]);
 
 			if (position && position.size !== 0) {
-				logger.info(`Position opening verified for ${asset}`);
+				logger.notify(`Position opening verified for ${asset}`);
 				return true;
 			}
 
@@ -109,7 +109,7 @@ async function verifyPositionClosed(zetaWrapper, asset, direction) {
 			const position = await zetaWrapper.getPosition(constants.Asset[asset]);
 
 			if (!position || position.size === 0) {
-				logger.info(`Position closure verified for ${asset}`);
+				logger.notify(`Position closure verified for ${asset}`);
 				return true;
 			}
 
@@ -150,7 +150,7 @@ async function retryOperation(operation, operationName, asset) {
 				throw new Error("Transaction failed - no transaction signature returned");
 			}
 
-			logger.info(`${operationName} successful on attempt ${attempt}`);
+			logger.notify(`${operationName} successful on attempt ${attempt}`);
 			return result;
 		} catch (error) {
 			const isLastAttempt = attempt === MAX_RETRIES;
