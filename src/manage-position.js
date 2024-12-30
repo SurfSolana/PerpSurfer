@@ -217,7 +217,6 @@ async function retryOperation(operation, operationName, asset) {
 
 				// Reinitialize the client
 				const zetaWrapper = new ZetaManagePositionClientWrapper();
-				await zetaWrapper.initializeExchange([constants.Asset[asset]]);
 				await zetaWrapper.initialize(keypairPath);
 			} catch (reloadError) {
 				logger.error(`Failed to reload exchange and client: ${reloadError}`);
