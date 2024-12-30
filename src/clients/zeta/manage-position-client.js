@@ -331,14 +331,28 @@ export class ZetaManagePositionClientWrapper {
 		}
 	}
 
-	async fetchSettings() {
+	// async fetchSettings() {
+	// 	const settings = {
+	// 		leverageMultiplier: CONFIG.leverageMultiplier,
+	// 		takeProfitPercentage: this.roundNumber(CONFIG.simpleTakeProfit, 2),
+	// 		stopLossPercentage: this.roundNumber(CONFIG.simpleStopLoss, 2),
+  //   };
+	// 	return settings;
+	// }
+
+  fetchSettings() {
 		const settings = {
 			leverageMultiplier: CONFIG.leverageMultiplier,
-			takeProfitPercentage: this.roundNumber(CONFIG.simpleTakeProfit, 2),
-			stopLossPercentage: this.roundNumber(CONFIG.simpleStopLoss, 2),
-    };
+			takeProfitPercentage: 0.036,
+			stopLossPercentage: 0.018,
+			trailingStopLoss: {
+				progressThreshold: 0.3,
+				stopLossDistance: 0.1,
+			},
+		};
 		return settings;
 	}
+
 
   createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
 		return this.client.createPlacePerpOrderInstruction(
