@@ -56,8 +56,8 @@ const CONFIG = {
 	// Required environment variables
 	requiredEnvVars: ["KEYPAIR_FILE_PATH", "WS_API_KEY", "RPC_TRADINGBOT"],
 
-	simpleTakeProfit: 6, // 6% take profit
-	simpleStopLoss: 3, // 3% stop loss
+	simpleTakeProfit: 4, // 6% take profit
+	simpleStopLoss: 2, // 3% stop loss
 };
 
 function validateConfig() {
