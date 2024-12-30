@@ -1,6 +1,6 @@
 import { ZetaLiveTradingClientWrapper } from "./clients/zeta/live-trading-client.js";
 import { Connection } from "@solana/web3.js";
-import { ASSETS, SYMBOLS, ACTIVE_SYMBOLS } from "./config/config.js";
+import { ASSETS, SYMBOLS, ACTIVE_SYMBOLS, CONFIG } from "./config/config.js";
 import logger from "./utils/logger.js";
 import { constants, types, Network, Exchange, utils } from "@zetamarkets/sdk";
 import WebSocket from "ws";
@@ -12,53 +12,6 @@ import { getMarketSentiment } from "./utils/market-sentiment.js";
 
 const execAsync = promisify(exec);
 dotenv.config();
-
-// System-wide configuration settings
-const CONFIG = {
-	// WebSocket and connection settings
-	ws: {
-		host: process.env.WS_HOST || "api.nosol.lol",
-		port: process.env.WS_PORT || 8080,
-		maxReconnectAttempts: 5,
-		reconnectDelay: 5000, // Time between reconnection attempts (ms)
-		messageQueueSize: 1000,
-	},
-
-	// Monitoring intervals (in milliseconds)
-	intervals: {
-		activePosition: 1000, // How often to check position status
-		healthCheck: 300000, // System health check interval (5 minutes)
-		statusUpdate: 3600000, // Status update interval (1 hour)
-	},
-
-	// Position management settings
-	position: {
-		// Initial threshold that triggers trailing stop monitoring (60%)
-		initialThreshold: 0.6,
-
-		// How much price can pull back from highest progress before closing (10%)
-		pullbackAmount: 0.1,
-
-		// Number of consecutive threshold hits needed to close position
-		thresholdHitCount: 3,
-
-		// Time to wait after position actions (milliseconds)
-		waitAfterAction: 15000,
-
-		// How often to check position progress
-		monitorInterval: 1000,
-	},
-
-	// Trading assets configuration
-	// tradingAssets: ["SOL", "BTC", "ETH"],  ACTIVE_SYMBOLS
-	tradingAssets: ACTIVE_SYMBOLS,
-
-	// Required environment variables
-	requiredEnvVars: ["KEYPAIR_FILE_PATH", "WS_API_KEY", "RPC_TRADINGBOT"],
-
-	simpleTakeProfit: 5, // 6% take profit
-	simpleStopLoss: 3, // 3% stop loss
-};
 
 function validateConfig() {
 	// Check required environment variables
