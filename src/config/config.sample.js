@@ -2,23 +2,7 @@ import { constants } from "@zetamarkets/sdk";
 import dotenv from "dotenv";
 dotenv.config();
 
-export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-
-export const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
-
-export const ASSETS = Object.values(constants.Asset).filter(
-	(asset) => asset !== "UNDEFINED"
-);
-
-export const SYMBOLS = ASSETS.map((asset) => constants.Asset[asset]);
-
-export const ACTIVE_SYMBOLS = ["SOL", "ETH", "BTC"];
-
-export const SERVER_NAME="SURF"; // Set to whatever you want, used only for logging.
-
-import { constants } from "@zetamarkets/sdk";
-import dotenv from "dotenv";
-dotenv.config();
+export const SERVER_NAME = "SURF";
 
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -29,8 +13,6 @@ export const ASSETS = Object.values(constants.Asset).filter((asset) => asset !==
 export const SYMBOLS = ASSETS.map((asset) => constants.Asset[asset]);
 
 export const ACTIVE_SYMBOLS = ["SOL", "ETH", "BTC"];
-
-export const SERVER_NAME = "PONY";
 
 // System-wide configuration settings
 export const CONFIG = {
@@ -59,7 +41,7 @@ export const CONFIG = {
 		pullbackAmount: 0.1,
 
 		// Number of consecutive threshold hits needed to close position
-		thresholdHitCount: 3,
+		thresholdHitCount: 2,
 
 		// Time to wait after position actions (milliseconds)
 		waitAfterAction: 15000,
@@ -75,9 +57,10 @@ export const CONFIG = {
 	// Required environment variables
 	requiredEnvVars: ["KEYPAIR_FILE_PATH", "WS_API_KEY", "RPC_TRADINGBOT"],
 
+  // Based on total balance
+  // ----------------------
 	simpleTakeProfit: 4, // 4% take profit
-	simpleStopLoss: 4, // 4% stop loss
+	simpleStopLoss:   4, // 4% stop loss
 
-  // universal leverage
 	leverageMultiplier: 4.8,
 };
