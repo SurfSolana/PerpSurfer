@@ -19,6 +19,23 @@ export class ZetaLiveTradingClientWrapper {
     return Math.round(price / tickSize) * tickSize;
   }
 
+  async getBalance() {
+    await Exchange.updateState();
+    await this.client.updateState(true,true);
+		const balance = Exchange.riskCalculator.getCrossMarginAccountState(this.client.account).balance;
+    return balance;
+  }
+
+  async crossMarginAccountState(debug = false) {
+    await Exchange.updateState();
+    await this.client.updateState(true,true);
+    const crossMarginAccountState = Exchange.riskCalculator.getCrossMarginAccountState(this.client.account);
+    if (debug) {
+      logger.info(`crossMarginAccountState: `, crossMarginAccountState);
+    }
+    return crossMarginAccountState;
+  }
+
   async initialize(markets = [constants.Asset.SOL], keypairPath = null) {
     try {
       const keyPath = keypairPath || process.env.KEYPAIR_FILE_PATH;

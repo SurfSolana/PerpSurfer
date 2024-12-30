@@ -55,6 +55,9 @@ const CONFIG = {
 
 	// Required environment variables
 	requiredEnvVars: ["KEYPAIR_FILE_PATH", "WS_API_KEY", "RPC_TRADINGBOT"],
+
+  simpleTakeProfit: 10, // 10% take profit
+  simpleStopLoss: 5, // 5% stop loss
 };
 
 function validateConfig() {
@@ -89,6 +92,7 @@ class SymbolTradingManager {
 
 		// Position monitoring state
 		this.positionMonitorInterval = null;
+		this.profitMonitorInterval = null;
 		this.lastCheckedPrice = null;
 
 		// Progress tracking properties
@@ -106,6 +110,90 @@ class SymbolTradingManager {
 		this.lowestPrice = Infinity;
 	}
 
+	// Start simple profit target monitoring
+	async startSimpleProfitMonitor(targetPercent = CONFIG.simpleTakeProfit) {
+		if (this.profitMonitorInterval) {
+			clearInterval(this.profitMonitorInterval);
+		}
+
+		this.profitMonitorInterval = setInterval(
+			() => this.monitorSimpleProfitTarget(targetPercent),
+			CONFIG.position.monitorInterval
+		);
+
+		logger.info(`[${this.symbol}] Started simple profit monitoring with ${targetPercent}% target`);
+	}
+
+  async monitorSimpleProfitTarget(targetPercent = CONFIG.simpleTakeProfit) {
+    try {
+        if (this.isClosing) return;
+
+        const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+
+        if (!currentPosition || currentPosition.size === 0) {
+            this.stopMonitoring();
+            return;
+        }
+
+        const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
+        const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
+        const direction = currentPosition.size > 0 ? "long" : "short";
+        const accountState = await this.zetaWrapper.crossMarginAccountState();
+
+        // Calculate dollar P&L
+        const dollarPnL = direction === "long"
+            ? (currentPrice - entryPrice) * Math.abs(currentPosition.size)
+            : (entryPrice - currentPrice) * Math.abs(currentPosition.size);
+
+        // Calculate PnL percentage using balance instead of equity
+        const unrealizedPnl = dollarPnL >= 0 
+            ? ((accountState.balance + dollarPnL)/accountState.balance - 1) * 100
+            : -((1 - (accountState.balance + dollarPnL)/accountState.balance) * 100);
+
+        // Log profit status if price changed
+        if (this.lastCheckedPrice !== currentPrice) {
+            logger.info(`[${this.symbol}] Simple Profit Monitor:`, {
+                direction: direction.toUpperCase(),
+                entryPrice: entryPrice.toFixed(4),
+                currentPrice: currentPrice.toFixed(4),
+                positionSize: Math.abs(currentPosition.size),
+                costOfTrades: `$${Math.abs(currentPosition.costOfTrades).toFixed(2)}`,
+                dollarPnL: `$${dollarPnL.toFixed(2)}`,
+                accountBalance: `$${accountState.balance.toFixed(2)}`,
+                unrealizedPnl: `${unrealizedPnl.toFixed(2)}%`,
+                targetPnl: `${targetPercent}%`,
+                stopLoss: `-${CONFIG.simpleStopLoss}%`
+            });
+            this.lastCheckedPrice = currentPrice;
+        }
+
+        // Check stop loss
+        if (unrealizedPnl <= -CONFIG.simpleStopLoss) {
+            logger.notify(`[${this.symbol}] Stop loss hit at ${unrealizedPnl.toFixed(2)}%`);
+            const closed = await this.closePosition("Stop loss hit");
+            if (closed) {
+                logger.notify(`[${this.symbol}] Position closed at stop loss ${unrealizedPnl.toFixed(2)}%`);
+            } else {
+                logger.warn(`[${this.symbol}] Failed to close position at stop loss - will retry`);
+            }
+            return;
+        }
+
+        // Take profit if target reached
+        if (unrealizedPnl >= targetPercent) {
+            logger.notify(`[${this.symbol}] Target profit ${targetPercent}% reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`);
+            const closed = await this.closePosition("Target profit reached");
+            if (closed) {
+                logger.notify(`[${this.symbol}] Position closed at ${unrealizedPnl.toFixed(2)}% profit`);
+            } else {
+                logger.warn(`[${this.symbol}] Failed to close position at profit target - will retry`);
+            }
+        }
+    } catch (error) {
+        logger.error(`[${this.symbol}] Error in simple profit monitoring:`, error);
+    }
+}
+  
 	async processSignal(signalData) {
 		let currentPosition;
 		try {
@@ -214,7 +302,7 @@ class SymbolTradingManager {
 							const newPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 							if (newPosition && newPosition.size !== 0) {
 								this.currentDirection = newDirection;
-								this.startPositionMonitor();
+								this.startSimpleProfitMonitor(CONFIG.simpleTakeProfit); // Replace this.startPositionMonitor();
 							}
 						}
 					}
@@ -229,7 +317,7 @@ class SymbolTradingManager {
 				});
 
 				this.currentDirection = existingDirection;
-				this.startPositionMonitor();
+				this.startSimpleProfitMonitor(CONFIG.simpleTakeProfit); // Replace this.startPositionMonitor();
 			}
 			return;
 		}
@@ -279,7 +367,7 @@ class SymbolTradingManager {
 				entryPrice: verifyPosition.costOfTrades ? (verifyPosition.costOfTrades / verifyPosition.size).toFixed(4) : "N/A",
 			});
 			this.currentDirection = actualDirection;
-			this.startPositionMonitor();
+			this.startSimpleProfitMonitor(CONFIG.simpleTakeProfit); // Replace this.startPositionMonitor();
 		}
 	}
 	async closePosition(reason = "") {
@@ -342,7 +430,7 @@ class SymbolTradingManager {
 		if (!this.positionMonitorInterval) {
 			const direction = verifyPosition.size > 0 ? "long" : "short";
 			this.currentDirection = direction;
-			this.startPositionMonitor();
+			this.startSimpleProfitMonitor(CONFIG.simpleTakeProfit); // Replace this.startPositionMonitor();
 		}
 
 		this.isClosing = false;
@@ -570,6 +658,10 @@ class SymbolTradingManager {
 			clearInterval(this.positionMonitorInterval);
 			this.positionMonitorInterval = null;
 		}
+		if (this.profitMonitorInterval) {
+			clearInterval(this.profitMonitorInterval);
+			this.profitMonitorInterval = null;
+		}
 		this.hasReachedThreshold = false;
 		this.highestProgress = 0;
 		this.lowestProgress = 0;
@@ -676,7 +768,7 @@ class TradingManager {
 						entryPrice: position.costOfTrades ? (position.costOfTrades / position.size).toFixed(4) : "N/A",
 					});
 
-					manager.startPositionMonitor();
+					manager.startSimpleProfitMonitor(CONFIG.simpleTakeProfit); // Replace manager.startPositionMonitor();
 				} else {
 					logger.info(`[${symbol}] No existing position found`);
 				}
