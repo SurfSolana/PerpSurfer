@@ -33,11 +33,11 @@ const CONFIG = {
 
 	// Position management settings
 	position: {
-		// Initial threshold that triggers trailing stop monitoring (40%)
-		initialThreshold: 0.2,
+		// Initial threshold that triggers trailing stop monitoring (60%)
+		initialThreshold: 0.6,
 
-		// How much price can pull back from highest progress before closing (15%)
-		pullbackAmount: 0.2,
+		// How much price can pull back from highest progress before closing (10%)
+		pullbackAmount: 0.1,
 
 		// Number of consecutive threshold hits needed to close position
 		thresholdHitCount: 3,
@@ -175,8 +175,9 @@ class SymbolTradingManager {
 				const isExtremeFear = marketConditions.sentiment === "Extreme Fear";
 
 				if ((isExtremeGreed && !isLongPosition) || (isExtremeFear && isLongPosition)) {
-
-          logger.notify(`[${this.symbol}] Position closure triggered by extreme market sentiment - ${marketConditions.sentiment}`);
+					logger.notify(
+						`[${this.symbol}] Position closure triggered by extreme market sentiment - ${marketConditions.sentiment}`
+					);
 
 					logger.info(`[${this.symbol}] Closing position due to extreme opposite market sentiment`, {
 						positionType: isLongPosition ? "LONG" : "SHORT",
@@ -189,7 +190,7 @@ class SymbolTradingManager {
 					if (closed) {
 						logger.info(`[${this.symbol}] Position closed due to extreme market conditions`);
 
-            logger.notify(`[${this.symbol}] Position successfully closed due to market sentiment`);
+						logger.notify(`[${this.symbol}] Position successfully closed due to market sentiment`);
 
 						if ((isExtremeGreed && signalData.signal === 1) || (isExtremeFear && signalData.signal === -1)) {
 							const newDirection = signalData.signal === 1 ? "long" : "short";
@@ -428,18 +429,30 @@ class SymbolTradingManager {
 			// 	this.lastCheckedPrice = currentPrice;
 			// }
 
-			// Inside monitorPosition() method:
+			// Inside monitorPosition() method where the progress display is:
+
 			if (this.lastCheckedPrice !== currentPrice) {
-				// Helper function to create unified progress bar
+				// Helper function to create unified progress bar with threshold indicator
 				const makeProgressBar = (percent, length = 40) => {
 					// Convert to 0-1 range where:
 					// 0 = stop loss
 					// 0.5 = entry
 					// 1 = take profit
 					const normalizedPercent = (percent + 1) / 2;
+					const normalizedThreshold = (CONFIG.position.initialThreshold + 1) / 2;
+
 					const position = Math.round(length * normalizedPercent);
-					const bar = "░".repeat(length);
-					return "│" + bar.slice(0, position) + "▓" + bar.slice(position + 1) + "│";
+					const thresholdPosition = Math.round(length * normalizedThreshold);
+
+					let bar = "░".repeat(length);
+					// Add threshold marker
+					if (thresholdPosition >= 0 && thresholdPosition < length) {
+						bar = bar.slice(0, thresholdPosition) + "│" + bar.slice(thresholdPosition + 1);
+					}
+					// Add position marker
+					bar = bar.slice(0, position) + "▓" + bar.slice(position + 1);
+
+					return "│" + bar + "│";
 				};
 
 				// Calculate direction emoji and color
@@ -465,18 +478,31 @@ class SymbolTradingManager {
 				const priceChange = direction === "long" ? priceChangePercent : -priceChangePercent;
 
 				let output = `\n\n${this.symbol} ${direction === "long" ? "LONG" : "SHORT"}`;
+
+				// Add threshold status
+				output += ` ${this.hasReachedThreshold ? "🎯" : "🎯"}`;
+				output += ` Threshold: ${(CONFIG.position.initialThreshold * 100).toFixed(1)}% ${
+					this.hasReachedThreshold ? "(Reached)" : "(Not Reached)"
+				}`;
+
+				// Price information block
+				output += "\n─────────────────────────────────────────────────────────";
 				output += `\nEntry: ${entryPrice.toFixed(2)} → Current: ${currentPrice.toFixed(2)} (${
 					priceChange >= 0 ? "+" : ""
 				}${priceChange.toFixed(2)}%)`;
+				output += `\nHigh: ${this.highestPrice.toFixed(2)} | Low: ${this.lowestPrice.toFixed(2)}`;
 				output += "\n─────────────────────────────────────────────────────────";
 
-				// Single progress bar with SL/Entry/TP markers
+				// Progress bar with markers
 				output += "\nSL ─────────────── Entry ─────────────── TP";
 				output += `\n${makeProgressBar(progressPercent)} ${getDirectionEmoji(progressPercent)} ${formatProgress(
 					progressPercent
 				)}`;
 
+				// Legend
 				output += "\n─────────────────────────────────────────────────────────";
+				output += "\n                                                              ";
+				output += "\n                                                              ";
 
 				logger.info(output);
 				this.lastCheckedPrice = currentPrice;
