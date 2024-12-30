@@ -80,10 +80,4 @@ export const CONFIG = {
 
   // universal leverage
 	leverageMultiplier: 4.8,
-
-  // Not active at this time
-	trailingStopLoss: {
-		progressThreshold: 0.6, // Updated default
-		stopLossDistance: 0.4,
-	},
 };

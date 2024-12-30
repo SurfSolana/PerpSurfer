@@ -3,6 +3,7 @@ import { PublicKey, Connection, Keypair, Transaction, ComputeBudgetProgram } fro
 import fs from "fs";
 import dotenv from "dotenv";
 import logger from "../../utils/logger.js";
+import { CONFIG } from "../../config/config.js";
 
 dotenv.config();
 
@@ -320,20 +321,16 @@ export class ZetaManagePositionClientWrapper {
 		}
 	}
 
-	fetchSettings() {
+	async fetchSettings() {
 		const settings = {
-			leverageMultiplier: 4,
-			takeProfitPercentage: 0.036,
-			stopLossPercentage: 0.018,
-			trailingStopLoss: {
-				progressThreshold: 0.3,
-				stopLossDistance: 0.1,
-			},
-		};
+			leverageMultiplier: CONFIG.leverageMultiplier,
+			takeProfitPercentage: this.roundNumber(CONFIG.simpleTakeProfit, 2),
+			stopLossPercentage: this.roundNumber(CONFIG.simpleStopLoss, 2),
+    };
 		return settings;
 	}
 
-	createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
+  createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
 		return this.client.createPlacePerpOrderInstruction(
 			marketIndex,
 			utils.convertDecimalToNativeInteger(adjustedPrice),

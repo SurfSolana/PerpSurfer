@@ -110,11 +110,7 @@ export class ZetaLiveTradingClientWrapper {
 			leverageMultiplier: CONFIG.leverageMultiplier,
 			takeProfitPercentage: this.roundNumber(CONFIG.simpleTakeProfit, 2),
 			stopLossPercentage: this.roundNumber(CONFIG.simpleStopLoss, 2),
-			trailingStopLoss: {
-				progressThreshold: this.roundNumber(CONFIG.trailingStopLoss.progressThreshold, 1),
-				stopLossDistance: this.roundNumber(CONFIG.trailingStopLoss.stopLossDistance, 1),
-			},
-		};
+    };
 
 		return settings;
 	}
