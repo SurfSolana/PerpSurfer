@@ -170,6 +170,16 @@ export class ZetaManagePositionClientWrapper {
 		return markPrice;
 	}
 
+	roundNumber(value, decimals = 2) {
+		if (value === null || value === undefined || isNaN(value)) {
+			return 0;
+		}
+
+		const factor = Math.pow(10, decimals);
+		return Math.round((Number(value) / 100) * factor) / factor;
+	}
+
+
 	async openPosition(direction, marketIndex = this.activeMarket, makerOrTaker = "taker") {
 		logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
 
