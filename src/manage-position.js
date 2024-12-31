@@ -15,8 +15,6 @@ function getRandomRetryDelay() {
 	return Math.floor(Math.random() * (3000 - 1000 + 1)) + 1000;
 }
 
-
-
 async function validateAndInitialize(markets) {
 	// Validate environment with single wallet configuration
 	const requiredEnvVars = ["KEYPAIR_FILE_PATH", "RPC_TRADINGBOT"];
@@ -41,29 +39,28 @@ async function validateAndInitialize(markets) {
 		25
 	);
 
+	// Store original console methods
+	const originalLog = console.log;
+	const originalError = console.error;
+	const originalInfo = console.info;
+	const originalWarn = console.warn;
+	const originalDebug = console.debug;
 
-        // Store original console methods
-        const originalLog = console.log;
-        const originalError = console.error;
-        const originalInfo = console.info;
-        const originalWarn = console.warn;
-        const originalDebug = console.debug;
-
-        // Disable all console output
-        console.log = () => {};
-        console.error = () => {};
-        console.info = () => {};
-        console.warn = () => {};
-        console.debug = () => {};
+	// Disable all console output
+	console.log = () => {};
+	console.error = () => {};
+	console.info = () => {};
+	console.warn = () => {};
+	console.debug = () => {};
 
 	await Exchange.load(loadExchangeConfig);
 
-        // Restore console methods
-        console.log = originalLog;
-        console.error = originalError;
-        console.info = originalInfo;
-        console.warn = originalWarn;
-        console.debug = originalDebug;
+	// Restore console methods
+	console.log = originalLog;
+	console.error = originalError;
+	console.info = originalInfo;
+	console.warn = originalWarn;
+	console.debug = originalDebug;
 
 	logger.info("Exchange loaded successfully");
 
@@ -97,8 +94,6 @@ async function verifyPositionOpened(zetaWrapper, asset, direction) {
 	return false;
 }
 
-
-
 async function verifyPositionClosed(zetaWrapper, asset, direction) {
 	const startTime = Date.now();
 
@@ -131,7 +126,7 @@ async function retryOperation(operation, operationName, asset) {
 	const exchangeConfig = {
 		network: Exchange.network,
 		connection: Exchange.connection,
-		opts: Exchange.opts
+		opts: Exchange.opts,
 	};
 
 	const keypairPath = process.env.KEYPAIR_FILE_PATH;
@@ -162,7 +157,7 @@ async function retryOperation(operation, operationName, asset) {
 				errorMessage.includes("Order size too small"); // Our early size check
 
 			if (isNonRetryable) {
-        logger.notify(`[CRITICAL] Non-retryable error encountered: ${errorMessage} - ${operationName}`);
+				logger.notify(`[CRITICAL] Non-retryable error encountered: ${errorMessage} - ${operationName}`);
 				logger.error(`${operationName} failed with non-retryable error: ${errorMessage}`);
 				process.exit(1);
 			}
@@ -177,50 +172,47 @@ async function retryOperation(operation, operationName, asset) {
 			logger.error(`${operationName} attempt ${attempt} failed:`, errorDetails);
 
 			if (isLastAttempt) {
-        logger.notify(`[CRITICAL] Operation failed after maximum ${MAX_RETRIES} attempts - ${operationName}`);
+				logger.notify(`[CRITICAL] Operation failed after maximum ${MAX_RETRIES} attempts - ${operationName}`);
 				logger.error(`${operationName} failed after ${MAX_RETRIES} attempts`);
 				throw error;
 			}
 
 			// Unload and reload exchange and client before retrying
-			try {
-				logger.info("Unloading exchange and client...");
-				await Exchange.close();
-				
-				logger.info("Reloading exchange and client...");
-                // Store original console methods
-                const originalLog = console.log;
-                const originalError = console.error;
-                const originalInfo = console.info;
-                const originalWarn = console.warn;
-                const originalDebug = console.debug;
 
-                // Disable all console output
-                console.log = () => {};
-                console.error = () => {};
-                console.info = () => {};
-                console.warn = () => {};
-                console.debug = () => {};
+			logger.info("Unloading exchange and client...");
+			await Exchange.close();
 
-				await Exchange.load({
-					network: exchangeConfig.network,
-					connection: exchangeConfig.connection,
-					opts: exchangeConfig.opts
-				});
+			logger.info("Reloading exchange and client...");
+			// Store original console methods
+			const originalLog = console.log;
+			const originalError = console.error;
+			const originalInfo = console.info;
+			const originalWarn = console.warn;
+			const originalDebug = console.debug;
 
-                // Restore console methods
-                console.log = originalLog;
-                console.error = originalError;
-                console.info = originalInfo;
-                console.warn = originalWarn;
-                console.debug = originalDebug;
+			// Disable all console output
+			console.log = () => {};
+			console.error = () => {};
+			console.info = () => {};
+			console.warn = () => {};
+			console.debug = () => {};
 
-				// Reinitialize the client
-				const zetaWrapper = new ZetaManagePositionClientWrapper();
-				await zetaWrapper.initialize(keypairPath);
-			} catch (reloadError) {
-				logger.error(`Failed to reload exchange and client: ${reloadError}`);
-			}
+			await Exchange.load({
+				network: exchangeConfig.network,
+				connection: exchangeConfig.connection,
+				opts: exchangeConfig.opts,
+			});
+
+			// Restore console methods
+			console.log = originalLog;
+			console.error = originalError;
+			console.info = originalInfo;
+			console.warn = originalWarn;
+			console.debug = originalDebug;
+
+			// Reinitialize the client
+			const zetaWrapper = new ZetaManagePositionClientWrapper();
+			await zetaWrapper.initialize(keypairPath);
 
 			const delay = getRandomRetryDelay();
 			logger.info(`Waiting ${delay}ms before retry...`);
@@ -230,7 +222,7 @@ async function retryOperation(operation, operationName, asset) {
 }
 
 async function openTestPosition(asset, direction) {
-  logger.notify(`[${asset}] Opening ${direction} position`);
+	logger.notify(`[${asset}] Opening ${direction} position`);
 
 	// Using single wallet for all operations
 	const keypairPath = process.env.KEYPAIR_FILE_PATH;
@@ -243,20 +235,24 @@ async function openTestPosition(asset, direction) {
 
 	try {
 		// Wrap the position opening in the retry mechanism
-		const tx_open = await retryOperation(async () => {
-			const result = await zetaWrapper.openPosition(direction, constants.Asset[asset]);
-			if (!result) {
-				throw new Error("Failed to open position - no transaction signature returned");
-			}
-			return result;
-		}, `open ${direction} position for ${asset}`, asset);
+		const tx_open = await retryOperation(
+			async () => {
+				const result = await zetaWrapper.openPosition(direction, constants.Asset[asset]);
+				if (!result) {
+					throw new Error("Failed to open position - no transaction signature returned");
+				}
+				return result;
+			},
+			`open ${direction} position for ${asset}`,
+			asset
+		);
 
 		if (tx_open) {
 			// Verify the position actually opened
 			const verified = await verifyPositionOpened(zetaWrapper, asset, direction);
 
 			if (verified) {
-        logger.notify(`[${asset}] Successfully opened and verified ${direction} position`);
+				logger.notify(`[${asset}] Successfully opened and verified ${direction} position`);
 				process.exit(0);
 			} else {
 				logger.error(`Failed to verify position opening for ${asset}`);
@@ -281,7 +277,7 @@ async function openTestPosition(asset, direction) {
 }
 
 async function closeTestPosition(asset, direction) {
-  logger.notify(`[${asset}] Closing ${direction} position`);
+	logger.notify(`[${asset}] Closing ${direction} position`);
 
 	const keypairPath = process.env.KEYPAIR_FILE_PATH;
 	logger.info(`Using wallet: ${keypairPath}`);
@@ -292,20 +288,24 @@ async function closeTestPosition(asset, direction) {
 
 	try {
 		// Only retry the actual close operation if it fails
-		const tx_close = await retryOperation(async () => {
-			const result = await zetaWrapper.closePosition(direction, constants.Asset[asset]);
-			if (!result) {
-				throw new Error("Failed to close position - no transaction signature returned");
-			}
-			return result;
-		}, `close ${direction} position for ${asset}`, asset);
+		const tx_close = await retryOperation(
+			async () => {
+				const result = await zetaWrapper.closePosition(direction, constants.Asset[asset]);
+				if (!result) {
+					throw new Error("Failed to close position - no transaction signature returned");
+				}
+				return result;
+			},
+			`close ${direction} position for ${asset}`,
+			asset
+		);
 
 		if (tx_close) {
 			// Verify the position actually closed
 			const verified = await verifyPositionClosed(zetaWrapper, asset, direction);
 
 			if (verified) {
-        logger.notify(`[${asset}] Successfully closed and verified ${direction} position`);
+				logger.notify(`[${asset}] Successfully closed and verified ${direction} position`);
 				process.exit(0);
 			} else {
 				logger.error(`Failed to verify position closure for ${asset}`);
@@ -319,7 +319,6 @@ async function closeTestPosition(asset, direction) {
 		process.exit(1);
 	}
 }
-
 
 // Handle process termination gracefully
 process.on("SIGINT", () => {

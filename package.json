@@ -6,6 +6,9 @@
   "main": "src/main.js",
   "scripts": {
     "start": "pm2 flush perpsurfer && pm2 restart perpsurfer && pm2 log perpsurfer",
+    "market": "node src/utils/test-sentiment.js",
+    "open": "node src/manage-position.js open",
+    "close": "node src/manage-position.js close",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

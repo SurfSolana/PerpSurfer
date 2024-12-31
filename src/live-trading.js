@@ -53,6 +53,9 @@ class SymbolTradingManager {
 		this.highestProgress = 0;
 		this.lowestProgress = 0;
 		this.thresholdHits = 0;
+		this.takeProfitHits = 0;
+		this.stopLossHits = 0;
+		this.trailingStopHits = 0;
 
 		// Position management state
 		this.isClosing = false;
@@ -61,6 +64,10 @@ class SymbolTradingManager {
 		// Price tracking
 		this.highestPrice = 0;
 		this.lowestPrice = Infinity;
+
+		// Trailing stop state
+		this.trailingStopPrice = null;
+		this.entryPrice = null;
 	}
 
 	// Start simple profit target monitoring
@@ -93,9 +100,54 @@ class SymbolTradingManager {
 			const direction = currentPosition.size > 0 ? "long" : "short";
 			const accountState = await this.zetaWrapper.crossMarginAccountState();
 
+			// Initialize entry price and trailing stop if not set
+			if (!this.entryPrice) {
+				this.entryPrice = entryPrice;
+				// Set initial trailing stop at 2% away
+				this.trailingStopPrice =
+					direction === "long"
+						? entryPrice * (1 - CONFIG.trailingStop.initialDistance / 100)
+						: entryPrice * (1 + CONFIG.trailingStop.initialDistance / 100);
+			}
+
 			// Track price extremes
 			this.highestPrice = Math.max(this.highestPrice || currentPrice, currentPrice);
 			this.lowestPrice = Math.min(this.lowestPrice === Infinity ? currentPrice : this.lowestPrice, currentPrice);
+
+			// Update trailing stop based on price movement
+			if (direction === "long") {
+				// For longs: Check if we've moved up 2% from entry before activating trailing stop
+				const priceProgressPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+				if (priceProgressPercent >= CONFIG.trailingStop.initialDistance) {
+					// Now activate trailing stop - maintain 1% trail
+					const potentialNewStop = currentPrice * (1 - CONFIG.trailingStop.trailDistance / 100);
+					if (potentialNewStop > this.trailingStopPrice) {
+						this.trailingStopPrice = potentialNewStop;
+					}
+				} else {
+					// Keep initial stop at 2% below entry until we reach activation threshold
+					this.trailingStopPrice = entryPrice * (1 - CONFIG.trailingStop.initialDistance / 100);
+				}
+			} else {
+				// For shorts: Check if we've moved down 2% from entry before activating trailing stop
+				const priceProgressPercent = ((entryPrice - currentPrice) / entryPrice) * 100;
+				if (priceProgressPercent >= CONFIG.trailingStop.initialDistance) {
+					// Now activate trailing stop - maintain 1% trail
+					const potentialNewStop = currentPrice * (1 + CONFIG.trailingStop.trailDistance / 100);
+					if (potentialNewStop < this.trailingStopPrice) {
+						this.trailingStopPrice = potentialNewStop;
+					}
+				} else {
+					// Keep initial stop at 2% above entry until we reach activation threshold
+					this.trailingStopPrice = entryPrice * (1 + CONFIG.trailingStop.initialDistance / 100);
+				}
+			}
+
+			// For display purposes, let's show both the activation status and the distance
+			const priceProgress =
+				direction === "long"
+					? ((currentPrice - entryPrice) / entryPrice) * 100
+					: ((entryPrice - currentPrice) / entryPrice) * 100;
 
 			// Calculate dollar P&L
 			const dollarPnL =
@@ -117,12 +169,7 @@ class SymbolTradingManager {
 			if (this.lastCheckedPrice !== currentPrice) {
 				// Helper function to create unified progress bar
 				const makeProgressBar = (percent, length = 42) => {
-					// Convert to 0-1 range where:
-					// -5 = stop loss
-					// 0 = entry
-					// +10 = take profit
-					const normalizedPercent =
-						(percent + CONFIG.simpleStopLoss) / (CONFIG.simpleTakeProfit + CONFIG.simpleStopLoss);
+					const normalizedPercent = (percent + CONFIG.simpleStopLoss) / (CONFIG.simpleTakeProfit + CONFIG.simpleStopLoss);
 					const position = Math.round(length * normalizedPercent);
 					const bar = "░".repeat(length);
 					return "│" + bar.slice(0, position) + "▓" + bar.slice(position + 1) + "│";
@@ -139,8 +186,16 @@ class SymbolTradingManager {
 				const priceChangePercent = ((currentPrice - entryPrice) / entryPrice) * 100;
 				const priceChange = direction === "long" ? priceChangePercent : -priceChangePercent;
 
+				// Calculate trailing stop distance as percentage of trailing stop price
+				const trailingStopDistance =
+					direction === "long"
+						? (((currentPrice - this.trailingStopPrice) / this.trailingStopPrice) * 100).toFixed(2)
+						: (((this.trailingStopPrice - currentPrice) / this.trailingStopPrice) * 100).toFixed(2);
+
 				let output = `\n \n \n \n\n${this.symbol} ${direction === "long" ? "LONG" : "SHORT"}`;
-				output += ` 🎯 TP: ${this.takeProfitHits}/${CONFIG.position.thresholdHitCount} SL: ${this.stopLossHits}/${CONFIG.position.thresholdHitCount}`;
+				output += ` 🎯 TP: ${this.takeProfitHits}/${CONFIG.position.thresholdHitCount}`;
+				output += ` SL: ${this.stopLossHits}/${CONFIG.position.thresholdHitCount}`;
+				output += ` TSL: ${this.trailingStopHits}/${CONFIG.position.thresholdHitCount}`;
 
 				// Price information block
 				output += "\n─────────────────────────────────────────────────────────";
@@ -148,6 +203,11 @@ class SymbolTradingManager {
 					priceChange >= 0 ? "+" : ""
 				}${priceChange.toFixed(2)}%)`;
 				output += `\nHigh: ${this.highestPrice.toFixed(2)} | Low: ${this.lowestPrice.toFixed(2)}`;
+				output += `\nTrailing Stop: ${this.trailingStopPrice.toFixed(2)} (${trailingStopDistance}% away)`;
+				output +=
+					priceProgress >= CONFIG.trailingStop.initialDistance
+						? " [ACTIVE]"
+						: ` [Activates at ${CONFIG.trailingStop.initialDistance}%]`;
 				output += "\n─────────────────────────────────────────────────────────";
 
 				// Progress bar with markers
@@ -163,10 +223,38 @@ class SymbolTradingManager {
 				this.lastCheckedPrice = currentPrice;
 			}
 
-			// Check stop loss with threshold hits
+			// Check trailing stop with threshold hits
+			const trailingStopHit =
+				direction === "long" ? currentPrice <= this.trailingStopPrice : currentPrice >= this.trailingStopPrice;
+
+			if (trailingStopHit) {
+				this.trailingStopHits++;
+				this.takeProfitHits = 0; // Reset other counters
+				this.stopLossHits = 0;
+
+				if (this.trailingStopHits >= CONFIG.position.thresholdHitCount) {
+					logger.notify(
+						`[${this.symbol}] Trailing stop confirmed after ${
+							CONFIG.position.thresholdHitCount
+						} hits at ${this.trailingStopPrice.toFixed(2)}`
+					);
+					const closed = await this.closePosition("Trailing stop hit");
+					if (closed) {
+						logger.notify(`[${this.symbol}] Position closed at trailing stop with ${unrealizedPnl.toFixed(2)}% PnL`);
+					} else {
+						logger.warn(`[${this.symbol}] Failed to close position at trailing stop - will retry`);
+					}
+					return;
+				}
+			} else {
+				this.trailingStopHits = 0;
+			}
+
+			// Check fixed stop loss with threshold hits
 			if (unrealizedPnl <= -CONFIG.simpleStopLoss) {
 				this.stopLossHits++;
 				this.takeProfitHits = 0; // Reset other counter
+				this.trailingStopHits = 0;
 
 				if (this.stopLossHits >= CONFIG.position.thresholdHitCount) {
 					logger.notify(
@@ -187,7 +275,8 @@ class SymbolTradingManager {
 			// Take profit with threshold hits
 			if (unrealizedPnl >= targetPercent) {
 				this.takeProfitHits++;
-				this.stopLossHits = 0; // Reset other counter
+				this.stopLossHits = 0; // Reset other counters
+				this.trailingStopHits = 0;
 
 				if (this.takeProfitHits >= CONFIG.position.thresholdHitCount) {
 					logger.notify(
@@ -386,6 +475,7 @@ class SymbolTradingManager {
 			this.startSimpleProfitMonitor(CONFIG.simpleTakeProfit); // Replace this.startPositionMonitor();
 		}
 	}
+
 	async closePosition(reason = "") {
 		if (this.isClosing) {
 			logger.info(`[${this.symbol}] Already attempting to close position`);
@@ -672,8 +762,13 @@ class SymbolTradingManager {
 		this.highestPrice = 0;
 		this.lowestPrice = Infinity;
 		this.thresholdHits = 0;
+		this.takeProfitHits = 0;
+		this.stopLossHits = 0;
+		this.trailingStopHits = 0;
 		this.isClosing = false;
 		this.currentDirection = null;
+		this.trailingStopPrice = null;
+		this.entryPrice = null;
 		logger.info(`[${this.symbol}] Stopped monitoring`);
 	}
 
@@ -811,7 +906,6 @@ class TradingManager {
 
 		this.ws.on("message", async (data) => {
 			try {
-
 				const signalData = JSON.parse(data.toString());
 
 				if (signalData.type === "connection") {

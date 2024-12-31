@@ -59,8 +59,14 @@ export const CONFIG = {
 
   // Based on total balance
   // ----------------------
-	simpleTakeProfit: 4, // 4% take profit
-	simpleStopLoss:   4, // 4% stop loss
+	simpleTakeProfit: 5, // X% take profit
+	simpleStopLoss:   5, // X% stop loss
+  trailingStop: {
+		initialDistance: 2, // Initial  X% stop distance
+		trailDistance: 1,   // Maintain X% trail distance
+	},
 
-	leverageMultiplier: 4.8,
+  // MAX for btc, eth, sol combo 
+  // 5.34 * 3 = 16.02x of 20x avail leverage.
+	leverageMultiplier: 5.34, 
 };
