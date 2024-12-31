@@ -151,9 +151,13 @@ async function retryOperation(operation, operationName, asset) {
 			const isLastAttempt = attempt === MAX_RETRIES;
 			let errorMessage = error.message || error.toString();
 
+
+
+      
 			// Check for non-retryable errors
 			const isNonRetryable =
 				error.code === 6008 || // ZeroSize
+				error.code === 6002 || // Failed initial margin requirement
 				errorMessage.includes("Order size too small"); // Our early size check
 
 			if (isNonRetryable) {
