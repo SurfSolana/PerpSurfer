@@ -70,7 +70,6 @@ export class ZetaManagePositionClientWrapper {
 		console.debug = originalDebug;
 
 		logger.info("Exchange loaded successfully");
-
 	}
 
 	async initialize(keypairPath = null) {
@@ -85,16 +84,20 @@ export class ZetaManagePositionClientWrapper {
 
 			logger.info("Wallet initialized", { usingPath: keyPath });
 
-			// Create client
-			this.client = await CrossClient.load(
-				this.connection, // connection: Connection,
-				this.wallet, // wallet: types.Wallet,
-				{ skipPreflight: true, preflightCommitment: "finalized", commitment: "finalized" }, // opts: ConfirmOptions = utils.defaultCommitment(),
-				undefined, // callback
-				false, // throttle: boolean = false
-				undefined, // delegator : PublicKey = undefined,
-				true // useVersionedTxs: boolean = false,
-			);
+			try {
+				// Create client
+				this.client = await CrossClient.load(
+					this.connection, // connection: Connection,
+					this.wallet, // wallet: types.Wallet,
+					{ skipPreflight: true, preflightCommitment: "finalized", commitment: "finalized" }, // opts: ConfirmOptions = utils.defaultCommitment(),
+					undefined, // callback
+					false, // throttle: boolean = false
+					undefined, // delegator : PublicKey = undefined,
+					true // useVersionedTxs: boolean = false,
+				);
+			} catch (error) {
+				logger.error(`Error reloading client.`, error);
+			}
 
 			logger.info("ZetaManagePositionClientWrapper initialized successfully");
 		} catch (error) {
@@ -179,11 +182,11 @@ export class ZetaManagePositionClientWrapper {
 		return Math.round((Number(value) / 100) * factor) / factor;
 	}
 
-
 	async openPosition(direction, marketIndex = this.activeMarket, makerOrTaker = "taker") {
 		logger.info(`Opening ${direction} position for ${assets.assetToName(marketIndex)}`);
 
-		const settings = this.fetchSettings();
+		const settings = this.fetchSettings(marketIndex, true);
+
 		logger.info(`Using settings:`, settings);
 
 		await this.client.updateState(true, true);
@@ -331,30 +334,36 @@ export class ZetaManagePositionClientWrapper {
 		}
 	}
 
-	// async fetchSettings() {
-	// 	const settings = {
-	// 		leverageMultiplier: CONFIG.leverageMultiplier,
-	// 		takeProfitPercentage: this.roundNumber(CONFIG.simpleTakeProfit, 2),
-	// 		stopLossPercentage: this.roundNumber(CONFIG.simpleStopLoss, 2),
-  //   };
-	// 	return settings;
-	// }
+	fetchSettings(marketIndex = this.activeMarket, debug = true) {
+		const symbol = assets.assetToName(marketIndex);
+		const tokenSettings = CONFIG.getTokenSettings(symbol);
 
-  fetchSettings() {
 		const settings = {
-			leverageMultiplier: CONFIG.leverageMultiplier,
-			takeProfitPercentage: 0.036,
-			stopLossPercentage: 0.018,
+			leverageMultiplier: tokenSettings.leverageMultiplier,
+			takeProfitPercentage: tokenSettings.simpleTakeProfit / 100,
+			stopLossPercentage: tokenSettings.simpleStopLoss / 100,
 			trailingStopLoss: {
-				progressThreshold: 0.3,
-				stopLossDistance: 0.1,
+				progressThreshold: tokenSettings.trailingStop.initialDistance / 100,
+				stopLossDistance: tokenSettings.trailingStop.trailDistance / 100,
 			},
 		};
+
+		if (debug) {
+			logger.info(`[${symbol}] Using token settings:`, {
+				leverage: settings.leverageMultiplier + "x",
+				takeProfit: settings.takeProfitPercentage * 100 + "%",
+				stopLoss: settings.stopLossPercentage * 100 + "%",
+				trailingStop: {
+					initial: settings.trailingStopLoss.progressThreshold * 100 + "%",
+					trail: settings.trailingStopLoss.stopLossDistance * 100 + "%",
+				},
+			});
+		}
+
 		return settings;
 	}
 
-
-  createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
+	createMainOrderInstruction(marketIndex, adjustedPrice, nativeLotSize, side, makerOrTaker = "taker") {
 		return this.client.createPlacePerpOrderInstruction(
 			marketIndex,
 			utils.convertDecimalToNativeInteger(adjustedPrice),
