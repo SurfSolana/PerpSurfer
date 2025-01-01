@@ -117,7 +117,7 @@ class SymbolTradingManager {
 
 			let priceProgressPercent;
 			// First - The Initial Setting
-			if (direction === "long") {
+if (direction === "long") {
 				priceProgressPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
 				// Only start trailing after hitting initial profit target
 				if (priceProgressPercent >= this.settings.trailingStop.initialDistance) {
@@ -145,6 +145,7 @@ class SymbolTradingManager {
 					// Before hitting target, trailing stop is set at entry price + initial distance
 					this.trailingStopPrice = entryPrice * (1 + this.settings.trailingStop.initialDistance / 100);
 				}
+			}
 
 			const dollarPnL =
 				direction === "long"
