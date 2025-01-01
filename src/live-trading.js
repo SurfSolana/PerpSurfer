@@ -122,6 +122,8 @@ class SymbolTradingManager {
 		this.lowestPrice = Infinity;
 		this.trailingStopPrice = null;
 		this.entryPrice = null;
+
+		this.trailingStatusMessage = "Waiting for threshold...";
 	}
 
 	/**
@@ -210,14 +212,11 @@ class SymbolTradingManager {
 			if (direction === "long") {
 				// Check if we've hit our initial balance gain threshold
 				if (unrealizedPnl >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
-					logger.notify(
-						`[${this.symbol}] 🎯 Trailing Stop Threshold ${
-							this.settings.trailingStop.initialDistance
-						}% Balance Change Reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`
-					);
-					logger.notify(
-						`[${this.symbol}] 🔄 Now tracking ${this.settings.trailingStop.trailDistance}% balance pullback from new highs`
-					);
+					this.trailingStatusMessage = `[${this.symbol}] 🎯 Trailing Stop Threshold ${
+						this.settings.trailingStop.initialDistance
+					}% Balance Change Reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`;
+
+					this.trailingStatusMessage = `[${this.symbol}] 🔄 Now tracking ${this.settings.trailingStop.trailDistance}% balance pullback from new highs`;
 					this.hasReachedThreshold = true;
 				}
 
@@ -229,9 +228,9 @@ class SymbolTradingManager {
 					if (requiredPrice > this.trailingStopPrice) {
 						this.trailingStopPrice = requiredPrice;
 						if (this.hasReachedThreshold) {
-							logger.notify(
-								`[${this.symbol}] 📈 New Balance High - Trailing Stop raised to ${this.trailingStopPrice.toFixed(2)}`
-							);
+							this.trailingStatusMessage = `[${
+								this.symbol
+							}] 📈 New Balance High - Trailing Stop raised to ${this.trailingStopPrice.toFixed(2)}`;
 						}
 					}
 				} else {
@@ -243,14 +242,10 @@ class SymbolTradingManager {
 			} else {
 				// Same logic for shorts but reversed
 				if (unrealizedPnl >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
-					logger.notify(
-						`[${this.symbol}] 🎯 Trailing Stop Threshold ${
-							this.settings.trailingStop.initialDistance
-						}% Balance Change Reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`
-					);
-					logger.notify(
-						`[${this.symbol}] 🔄 Now tracking ${this.settings.trailingStop.trailDistance}% balance pullback from new highs`
-					);
+					this.trailingStatusMessage = `[${this.symbol}] 🎯 Trailing Stop Threshold ${
+						this.settings.trailingStop.initialDistance
+					}% Balance Change Reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`;
+					this.trailingStatusMessage = `[${this.symbol}] 🔄 Now tracking ${this.settings.trailingStop.trailDistance}% balance pullback from new highs`;
 					this.hasReachedThreshold = true;
 				}
 
@@ -262,9 +257,9 @@ class SymbolTradingManager {
 					if (requiredPrice < this.trailingStopPrice) {
 						this.trailingStopPrice = requiredPrice;
 						if (this.hasReachedThreshold) {
-							logger.notify(
-								`[${this.symbol}] 📉 New Balance High - Trailing Stop lowered to ${this.trailingStopPrice.toFixed(2)}`
-							);
+							this.trailingStatusMessage = `[${
+								this.symbol
+							}] 📉 New Balance High - Trailing Stop lowered to ${this.trailingStopPrice.toFixed(2)}`;
 						}
 					}
 				} else {
@@ -329,6 +324,8 @@ class SymbolTradingManager {
 				// Show highest and lowest balance impacts
 				output += `\nLow: ${this.lowestProgress.toFixed(2)}% | High: ${this.highestProgress.toFixed(2)}% `;
 				output += `\nBalance: $${accountState.balance.toFixed(2)} | P&L: $${dollarPnL.toFixed(2)}`;
+				output += "\n─────────────────────────────────────────────────────────";
+				output += `\nStatus: ${this.trailingStatusMessage}`;
 
 				logger.info(output);
 				this.lastCheckedPrice = currentPrice;
