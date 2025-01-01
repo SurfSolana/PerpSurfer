@@ -310,7 +310,15 @@ class SymbolTradingManager {
 				output += "\n─────────────────────────────────────────────────────────";
 				output += `\nEntry Balance: $${this.initialBalance.toFixed(2)} → Current: $${accountState.balance.toFixed(2)}`;
 				output += `\nPosition Size: ${currentPosition.size} @ $${entryPrice.toFixed(2)} → $${currentPrice.toFixed(2)}`;
-				output += `\nTSL: $${this.trailingStopPrice.toFixed(2)} (${trailingStopPnL.toFixed(2)}% balance)`;
+
+				if (this.hasReachedThreshold) {
+					const pullback = unrealizedPnl - this.highestProgress;
+					output += `\nTSL: $${this.trailingStopPrice.toFixed(2)} (${pullback.toFixed(2)}%)`;
+				} else {
+					const distanceToThreshold = this.settings.trailingStop.initialDistance - unrealizedPnl;
+					output += `\nTSL: Need ${distanceToThreshold.toFixed(2)}% more to reach threshold`;
+				}
+
 				output += this.hasReachedThreshold ? " 🟢" : " ⚪";
 				output += "\n─────────────────────────────────────────────────────────";
 
