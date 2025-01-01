@@ -85,208 +85,217 @@ class SymbolTradingManager {
 
 
   
-	async monitorSimpleProfitTarget(targetPercent = null) {
-		try {
-			if (this.isClosing) return;
+async monitorSimpleProfitTarget(targetPercent = null) {
+    try {
+        if (this.isClosing) return;
 
-			this.settings = CONFIG.getTokenSettings(this.symbol);
-			const target = targetPercent || this.settings.simpleTakeProfit;
+        this.settings = CONFIG.getTokenSettings(this.symbol);
+        const target = targetPercent || this.settings.simpleTakeProfit;
 
-			const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+        const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 
-			if (!currentPosition || currentPosition.size === 0) {
-				this.stopMonitoring();
-				return;
-			}
+        if (!currentPosition || currentPosition.size === 0) {
+            this.stopMonitoring();
+            return;
+        }
 
-			const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
-			const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
-			const direction = currentPosition.size > 0 ? "long" : "short";
-			const accountState = await this.zetaWrapper.crossMarginAccountState();
+        const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
+        const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
+        const direction = currentPosition.size > 0 ? "long" : "short";
+        const accountState = await this.zetaWrapper.crossMarginAccountState();
 
-			if (!this.entryPrice) {
-				this.entryPrice = entryPrice;
-				this.trailingStopPrice =
-					direction === "long"
-						? entryPrice * (1 - this.settings.trailingStop.initialDistance / 100)
-						: entryPrice * (1 + this.settings.trailingStop.initialDistance / 100);
-			}
+        if (!this.entryPrice) {
+            this.entryPrice = entryPrice;
+            this.trailingStopPrice =
+                direction === "long"
+                    ? entryPrice * (1 - this.settings.trailingStop.initialDistance / 100)
+                    : entryPrice * (1 + this.settings.trailingStop.initialDistance / 100);
+        }
 
-			this.highestPrice = Math.max(this.highestPrice || currentPrice, currentPrice);
-			this.lowestPrice = Math.min(this.lowestPrice === Infinity ? currentPrice : this.lowestPrice, currentPrice);
+        this.highestPrice = Math.max(this.highestPrice || currentPrice, currentPrice);
+        this.lowestPrice = Math.min(this.lowestPrice === Infinity ? currentPrice : this.lowestPrice, currentPrice);
 
-			let priceProgressPercent;
-			// First - The Initial Setting
-if (direction === "long") {
-				priceProgressPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
-				// Only start trailing after hitting initial profit target
-				if (priceProgressPercent >= this.settings.trailingStop.initialDistance) {
-					// Calculate new potential stop price
-					const potentialNewStop = currentPrice * (1 - this.settings.trailingStop.trailDistance / 100);
-					// Update only if it would raise the stop price
-					if (potentialNewStop > this.trailingStopPrice) {
-						this.trailingStopPrice = potentialNewStop;
-					}
-				} else {
-					// Before hitting target, trailing stop is set at entry price - initial distance
-					this.trailingStopPrice = entryPrice * (1 - this.settings.trailingStop.initialDistance / 100);
-				}
-			} else {
-				priceProgressPercent = ((entryPrice - currentPrice) / entryPrice) * 100;
-				// Only start trailing after hitting initial profit target
-				if (priceProgressPercent >= this.settings.trailingStop.initialDistance) {
-					// Calculate new potential stop price
-					const potentialNewStop = currentPrice * (1 + this.settings.trailingStop.trailDistance / 100);
-					// Update only if it would lower the stop price
-					if (potentialNewStop < this.trailingStopPrice) {
-						this.trailingStopPrice = potentialNewStop;
-					}
-				} else {
-					// Before hitting target, trailing stop is set at entry price + initial distance
-					this.trailingStopPrice = entryPrice * (1 + this.settings.trailingStop.initialDistance / 100);
-				}
-			}
+        let priceProgressPercent;
+        if (direction === "long") {
+            priceProgressPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+            // Track when we hit the initial threshold
+            if (priceProgressPercent >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
+                logger.notify(`[${this.symbol}] Trailing Stop Activated! Price progress: ${priceProgressPercent.toFixed(2)}%`);
+                this.hasReachedThreshold = true;
+            }
+            // Only start trailing after hitting initial profit target
+            if (priceProgressPercent >= this.settings.trailingStop.initialDistance) {
+                // Calculate new potential stop price
+                const potentialNewStop = currentPrice * (1 - this.settings.trailingStop.trailDistance / 100);
+                // Update only if it would raise the stop price
+                if (potentialNewStop > this.trailingStopPrice) {
+                    this.trailingStopPrice = potentialNewStop;
+                }
+            } else {
+                // Before hitting target, trailing stop is set at entry price - initial distance
+                this.trailingStopPrice = entryPrice * (1 - this.settings.trailingStop.initialDistance / 100);
+            }
+        } else {
+            priceProgressPercent = ((entryPrice - currentPrice) / entryPrice) * 100;
+            // Track when we hit the initial threshold
+            if (priceProgressPercent >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
+                logger.notify(`[${this.symbol}] Trailing Stop Activated! Price progress: ${priceProgressPercent.toFixed(2)}%`);
+                this.hasReachedThreshold = true;
+            }
+            // Only start trailing after hitting initial profit target
+            if (priceProgressPercent >= this.settings.trailingStop.initialDistance) {
+                // Calculate new potential stop price
+                const potentialNewStop = currentPrice * (1 + this.settings.trailingStop.trailDistance / 100);
+                // Update only if it would lower the stop price
+                if (potentialNewStop < this.trailingStopPrice) {
+                    this.trailingStopPrice = potentialNewStop;
+                }
+            } else {
+                // Before hitting target, trailing stop is set at entry price + initial distance
+                this.trailingStopPrice = entryPrice * (1 + this.settings.trailingStop.initialDistance / 100);
+            }
+        }
 
-			const dollarPnL =
-				direction === "long"
-					? (currentPrice - entryPrice) * Math.abs(currentPosition.size)
-					: (entryPrice - currentPrice) * Math.abs(currentPosition.size);
+        const dollarPnL =
+            direction === "long"
+                ? (currentPrice - entryPrice) * Math.abs(currentPosition.size)
+                : (entryPrice - currentPrice) * Math.abs(currentPosition.size);
 
-			const unrealizedPnl =
-				dollarPnL >= 0
-					? ((accountState.balance + dollarPnL) / accountState.balance - 1) * 100
-					: -((1 - (accountState.balance + dollarPnL) / accountState.balance) * 100);
+        const unrealizedPnl =
+            dollarPnL >= 0
+                ? ((accountState.balance + dollarPnL) / accountState.balance - 1) * 100
+                : -((1 - (accountState.balance + dollarPnL) / accountState.balance) * 100);
 
-			this.highestProgress = Math.max(this.highestProgress, unrealizedPnl);
-			this.lowestProgress = Math.min(this.lowestProgress, unrealizedPnl);
+        this.highestProgress = Math.max(this.highestProgress, unrealizedPnl);
+        this.lowestProgress = Math.min(this.lowestProgress, unrealizedPnl);
 
-			if (this.lastCheckedPrice !== currentPrice) {
-				const makeProgressBar = (percent, length = 42) => {
-					const normalizedPercent =
-						(percent + this.settings.simpleStopLoss) / (this.settings.simpleTakeProfit + this.settings.simpleStopLoss);
-					const position = Math.round(length * normalizedPercent);
-					const bar = "░".repeat(length);
-					return "│" + bar.slice(0, position) + "▓" + bar.slice(position + 1) + "│";
-				};
+        if (this.lastCheckedPrice !== currentPrice) {
+            const makeProgressBar = (percent, length = 42) => {
+                const normalizedPercent =
+                    (percent + this.settings.simpleStopLoss) / (this.settings.simpleTakeProfit + this.settings.simpleStopLoss);
+                const position = Math.round(length * normalizedPercent);
+                const bar = "░".repeat(length);
+                return "│" + bar.slice(0, position) + "▓" + bar.slice(position + 1) + "│";
+            };
 
-				const getDirectionEmoji = (percent) => {
-					if (percent > 0) return "🟢";
-					if (percent < 0) return "🔴";
-					return "⚪";
-				};
+            const getDirectionEmoji = (percent) => {
+                if (percent > 0) return "🟢";
+                if (percent < 0) return "🔴";
+                return "⚪";
+            };
 
-				const priceChangePercent = ((currentPrice - entryPrice) / entryPrice) * 100;
-				const priceChange = direction === "long" ? priceChangePercent : -priceChangePercent;
+            const priceChangePercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+            const priceChange = direction === "long" ? priceChangePercent : -priceChangePercent;
 
-				// Later in the display section
-				const trailingStopDistance =
-					direction === "long"
-						? (((currentPrice - this.trailingStopPrice) / currentPrice) * 100).toFixed(2)
-						: (((this.trailingStopPrice - currentPrice) / currentPrice) * 100).toFixed(2);
+            const trailingStopDistance =
+                direction === "long"
+                    ? (((currentPrice - this.trailingStopPrice) / currentPrice) * 100).toFixed(2)
+                    : (((this.trailingStopPrice - currentPrice) / currentPrice) * 100).toFixed(2);
 
-				let output = `\n \n \n \n\n${this.symbol} ${direction === "long" ? "LONG" : "SHORT"}`;
-				output += ` 🎯 TP: ${this.takeProfitHits}/${CONFIG.position.thresholdHitCount}`;
-				output += ` SL: ${this.stopLossHits}/${CONFIG.position.thresholdHitCount}`;
-				output += ` TSL: ${this.trailingStopHits}/${CONFIG.position.thresholdHitCount}`;
+            let output = `\n \n \n \n\n${this.symbol} ${direction === "long" ? "LONG" : "SHORT"}`;
+            output += ` 🎯 TP: ${this.takeProfitHits}/${CONFIG.position.thresholdHitCount}`;
+            output += ` SL: ${this.stopLossHits}/${CONFIG.position.thresholdHitCount}`;
+            output += ` TSL: ${this.trailingStopHits}/${CONFIG.position.thresholdHitCount}`;
 
-				output += `\n${this.settings.leverageMultiplier}x `;
-				output += ` | TP: ${this.settings.simpleTakeProfit}%`;
-				output += ` | SL: ${this.settings.simpleStopLoss}%`;
-				output += ` | TSL: ${this.settings.trailingStop.initialDistance}% → ${this.settings.trailingStop.trailDistance}%`;
+            output += `\n${this.settings.leverageMultiplier}x `;
+            output += ` | TP: ${this.settings.simpleTakeProfit}%`;
+            output += ` | SL: ${this.settings.simpleStopLoss}%`;
+            output += ` | TSL: ${this.settings.trailingStop.initialDistance}% → ${this.settings.trailingStop.trailDistance}%`;
+            output += this.hasReachedThreshold ? " ✅" : " 🔄";
 
-				output += "\n─────────────────────────────────────────────────────────";
-				output += `\nEntry: ${entryPrice.toFixed(2)} → Current: ${currentPrice.toFixed(2)} (${
-					priceChange >= 0 ? "+" : ""
-				}${priceChange.toFixed(2)}%)`;
-				output += `\nHigh: ${this.highestPrice.toFixed(2)} | Low: ${this.lowestPrice.toFixed(2)}`;
+            output += "\n─────────────────────────────────────────────────────────";
+            output += `\nEntry: ${entryPrice.toFixed(2)} → Current: ${currentPrice.toFixed(2)} (${
+                priceChange >= 0 ? "+" : ""
+            }${priceChange.toFixed(2)}%)`;
+            output += `\nHigh: ${this.highestPrice.toFixed(2)} | Low: ${this.lowestPrice.toFixed(2)}`;
 
-				output += `\nTSL: ${this.trailingStopPrice.toFixed(2)} (${trailingStopDistance}% away)`;
-				output += this.trailingStopHits >= CONFIG.position.thresholdHitCount ? " ✅" : " ";
-				output += "\n─────────────────────────────────────────────────────────";
+            output += `\nTSL: ${this.trailingStopPrice.toFixed(2)} (${trailingStopDistance}% away)`;
+            output += this.hasReachedThreshold ? " 🟢" : " ⚪";
+            output += "\n─────────────────────────────────────────────────────────";
 
-				output += `\nSL -${this.settings.simpleStopLoss}% ──────────── Entry ──────────── TP ${this.settings.simpleTakeProfit}%`;
-				output += `\n${makeProgressBar(unrealizedPnl)} ${getDirectionEmoji(unrealizedPnl)} ${unrealizedPnl.toFixed(2)}%`;
-				output += "\n─────────────────────────────────────────────────────────";
+            output += `\nSL -${this.settings.simpleStopLoss}% ──────────── Entry ──────────── TP ${this.settings.simpleTakeProfit}%`;
+            output += `\n${makeProgressBar(unrealizedPnl)} ${getDirectionEmoji(unrealizedPnl)} ${unrealizedPnl.toFixed(2)}%`;
+            output += "\n─────────────────────────────────────────────────────────";
 
-				output += `\nHighest: ${this.highestProgress.toFixed(2)}% | Lowest: ${this.lowestProgress.toFixed(2)}%`;
-				output += `\nBalance: $${accountState.balance.toFixed(2)} | P&L: $${dollarPnL.toFixed(2)}`;
+            output += `\nHighest: ${this.highestProgress.toFixed(2)}% | Lowest: ${this.lowestProgress.toFixed(2)}%`;
+            output += `\nBalance: $${accountState.balance.toFixed(2)} | P&L: $${dollarPnL.toFixed(2)}`;
 
-				logger.info(output);
-				this.lastCheckedPrice = currentPrice;
-			}
+            logger.info(output);
+            this.lastCheckedPrice = currentPrice;
+        }
 
-			const trailingStopHit =
-				direction === "long" ? currentPrice <= this.trailingStopPrice : currentPrice >= this.trailingStopPrice;
+        const trailingStopHit =
+            direction === "long" ? currentPrice <= this.trailingStopPrice : currentPrice >= this.trailingStopPrice;
 
-			if (trailingStopHit) {
-				this.trailingStopHits++;
-				this.takeProfitHits = 0;
-				this.stopLossHits = 0;
+        if (trailingStopHit) {
+            this.trailingStopHits++;
+            this.takeProfitHits = 0;
+            this.stopLossHits = 0;
 
-				if (this.trailingStopHits >= CONFIG.position.thresholdHitCount) {
-					logger.notify(
-						`[${this.symbol}] Trailing stop confirmed after ${
-							CONFIG.position.thresholdHitCount
-						} hits at ${this.trailingStopPrice.toFixed(2)}`
-					);
-					const closed = await this.closePosition("Trailing stop hit");
-					if (closed) {
-						logger.notify(`[${this.symbol}] Position closed at trailing stop with ${unrealizedPnl.toFixed(2)}% PnL`);
-					} else {
-						logger.warn(`[${this.symbol}] Failed to close position at trailing stop - will retry`);
-					}
-					return;
-				}
-			} else {
-				this.trailingStopHits = 0;
-			}
+            if (this.trailingStopHits >= CONFIG.position.thresholdHitCount) {
+                logger.notify(
+                    `[${this.symbol}] Trailing stop confirmed after ${
+                        CONFIG.position.thresholdHitCount
+                    } hits at ${this.trailingStopPrice.toFixed(2)}`
+                );
+                const closed = await this.closePosition("Trailing stop hit");
+                if (closed) {
+                    logger.notify(`[${this.symbol}] Position closed at trailing stop with ${unrealizedPnl.toFixed(2)}% PnL`);
+                } else {
+                    logger.warn(`[${this.symbol}] Failed to close position at trailing stop - will retry`);
+                }
+                return;
+            }
+        } else {
+            this.trailingStopHits = 0;
+        }
 
-			if (unrealizedPnl <= -this.settings.simpleStopLoss) {
-				this.stopLossHits++;
-				this.takeProfitHits = 0;
-				this.trailingStopHits = 0;
+        if (unrealizedPnl <= -this.settings.simpleStopLoss) {
+            this.stopLossHits++;
+            this.takeProfitHits = 0;
+            this.trailingStopHits = 0;
 
-				if (this.stopLossHits >= CONFIG.position.thresholdHitCount) {
-					logger.notify(
-						`[${this.symbol}] Stop loss confirmed after ${CONFIG.position.thresholdHitCount} hits at ${unrealizedPnl.toFixed(2)}%`
-					);
-					const closed = await this.closePosition("Stop loss hit");
-					if (closed) {
-						logger.notify(`[${this.symbol}] Position closed at stop loss ${unrealizedPnl.toFixed(2)}%`);
-					} else {
-						logger.warn(`[${this.symbol}] Failed to close position at stop loss - will retry`);
-					}
-					return;
-				}
-			} else {
-				this.stopLossHits = 0;
-			}
+            if (this.stopLossHits >= CONFIG.position.thresholdHitCount) {
+                logger.notify(
+                    `[${this.symbol}] Stop loss confirmed after ${CONFIG.position.thresholdHitCount} hits at ${unrealizedPnl.toFixed(2)}%`
+                );
+                const closed = await this.closePosition("Stop loss hit");
+                if (closed) {
+                    logger.notify(`[${this.symbol}] Position closed at stop loss ${unrealizedPnl.toFixed(2)}%`);
+                } else {
+                    logger.warn(`[${this.symbol}] Failed to close position at stop loss - will retry`);
+                }
+                return;
+            }
+        } else {
+            this.stopLossHits = 0;
+        }
 
-			if (unrealizedPnl >= target) {
-				this.takeProfitHits++;
-				this.stopLossHits = 0;
-				this.trailingStopHits = 0;
+        if (unrealizedPnl >= target) {
+            this.takeProfitHits++;
+            this.stopLossHits = 0;
+            this.trailingStopHits = 0;
 
-				if (this.takeProfitHits >= CONFIG.position.thresholdHitCount) {
-					logger.notify(
-						`[${this.symbol}] Take profit confirmed after ${
-							CONFIG.position.thresholdHitCount
-						} hits! Current PnL: ${unrealizedPnl.toFixed(2)}%`
-					);
-					const closed = await this.closePosition("Target profit reached");
-					if (closed) {
-						logger.notify(`[${this.symbol}] Position closed at ${unrealizedPnl.toFixed(2)}% profit`);
-					} else {
-						logger.warn(`[${this.symbol}] Failed to close position at profit target - will retry`);
-					}
-				}
-			} else {
-				this.takeProfitHits = 0;
-			}
-		} catch (error) {
-			logger.error(`[${this.symbol}] Error in simple profit monitoring:`, error);
-		}
-	}
+            if (this.takeProfitHits >= CONFIG.position.thresholdHitCount) {
+                logger.notify(
+                    `[${this.symbol}] Take profit confirmed after ${
+                        CONFIG.position.thresholdHitCount
+                    } hits! Current PnL: ${unrealizedPnl.toFixed(2)}%`
+                );
+                const closed = await this.closePosition("Target profit reached");
+                if (closed) {
+                    logger.notify(`[${this.symbol}] Position closed at ${unrealizedPnl.toFixed(2)}% profit`);
+                } else {
+                    logger.warn(`[${this.symbol}] Failed to close position at profit target - will retry`);
+                }
+            }
+        } else {
+            this.takeProfitHits = 0;
+        }
+    } catch (error) {
+        logger.error(`[${this.symbol}] Error in simple profit monitoring:`, error);
+    }
+}
 
 	async processSignal(signalData) {
 		let currentPosition;
