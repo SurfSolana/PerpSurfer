@@ -185,7 +185,7 @@ class SymbolTradingManager {
 				output += ` SL: ${this.stopLossHits}/${CONFIG.position.thresholdHitCount}`;
 				output += ` TSL: ${this.trailingStopHits}/${CONFIG.position.thresholdHitCount}`;
 
-				output += `\n${this.settings.leverageMultiplier}x Leverage`;
+				output += `\n${this.settings.leverageMultiplier}x `;
 				output += ` | TP: ${this.settings.simpleTakeProfit}%`;
 				output += ` | SL: ${this.settings.simpleStopLoss}%`;
 				output += ` | TSL: ${this.settings.trailingStop.initialDistance}% → ${this.settings.trailingStop.trailDistance}%`;
@@ -196,11 +196,8 @@ class SymbolTradingManager {
 				}${priceChange.toFixed(2)}%)`;
 				output += `\nHigh: ${this.highestPrice.toFixed(2)} | Low: ${this.lowestPrice.toFixed(2)}`;
 
-				output += `\nTrailing Stop: ${this.trailingStopPrice.toFixed(2)} (${trailingStopDistance}% away)`;
-				output +=
-					priceProgressPercent >= this.settings.trailingStop.initialDistance
-						? " [ACTIVE]"
-						: "";
+				output += `\nTSL: ${this.trailingStopPrice.toFixed(2)} (${trailingStopDistance}% away)`;
+				output += this.trailingStopHits >= CONFIG.position.thresholdHitCount ? " ✅" : " ";
 				output += "\n─────────────────────────────────────────────────────────";
 
 				output += `\nSL -${this.settings.simpleStopLoss}% ──────────── Entry ──────────── TP ${this.settings.simpleTakeProfit}%`;
@@ -601,6 +598,16 @@ class TradingManager {
 
 			await Exchange.load(loadExchangeConfig);
 			logger.info("[INIT] Exchange loaded successfully");
+
+      if (process.env.RPC_DOUBLEDOWN_1) {
+        const doubledown_1 = new Connection(process.env.RPC_DOUBLEDOWN_1);
+        await Exchange.addDoubleDownConnection(doubledown_1);
+      }
+    
+      if (process.env.RPC_DOUBLEDOWN_2) {
+        const doubledown_2 = new Connection(process.env.RPC_DOUBLEDOWN_2);
+        await Exchange.addDoubleDownConnection(doubledown_2);
+      }    
 
 			this.zetaWrapper = new ZetaLiveTradingClientWrapper();
 			const marketIndices = symbols.map((symbol) => constants.Asset[symbol]);
