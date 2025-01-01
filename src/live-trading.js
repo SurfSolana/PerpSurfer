@@ -119,29 +119,32 @@ class SymbolTradingManager {
 			// First - The Initial Setting
 			if (direction === "long") {
 				priceProgressPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+				// Only start trailing after hitting initial profit target
 				if (priceProgressPercent >= this.settings.trailingStop.initialDistance) {
-					// Only update if new stop would be higher
+					// Calculate new potential stop price
 					const potentialNewStop = currentPrice * (1 - this.settings.trailingStop.trailDistance / 100);
+					// Update only if it would raise the stop price
 					if (potentialNewStop > this.trailingStopPrice) {
 						this.trailingStopPrice = potentialNewStop;
 					}
 				} else {
-					// THIS NEEDS TO CHANGE - Currently setting too far back
-					this.trailingStopPrice = currentPrice * (1 - (this.settings.trailingStop.initialDistance - priceProgressPercent) / 100);
+					// Before hitting target, trailing stop is set at entry price - initial distance
+					this.trailingStopPrice = entryPrice * (1 - this.settings.trailingStop.initialDistance / 100);
 				}
 			} else {
 				priceProgressPercent = ((entryPrice - currentPrice) / entryPrice) * 100;
+				// Only start trailing after hitting initial profit target
 				if (priceProgressPercent >= this.settings.trailingStop.initialDistance) {
-					// Only update if new stop would be lower
+					// Calculate new potential stop price
 					const potentialNewStop = currentPrice * (1 + this.settings.trailingStop.trailDistance / 100);
+					// Update only if it would lower the stop price
 					if (potentialNewStop < this.trailingStopPrice) {
 						this.trailingStopPrice = potentialNewStop;
 					}
 				} else {
-					// THIS NEEDS TO CHANGE - Currently setting too far away
-					this.trailingStopPrice = currentPrice * (1 + (this.settings.trailingStop.initialDistance - priceProgressPercent) / 100);
+					// Before hitting target, trailing stop is set at entry price + initial distance
+					this.trailingStopPrice = entryPrice * (1 + this.settings.trailingStop.initialDistance / 100);
 				}
-			}
 
 			const dollarPnL =
 				direction === "long"
