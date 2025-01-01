@@ -55,15 +55,6 @@ async function validateAndInitialize(markets) {
 
 	await Exchange.load(loadExchangeConfig);
 
-	// Restore console methods
-	console.log = originalLog;
-	console.error = originalError;
-	console.info = originalInfo;
-	console.warn = originalWarn;
-	console.debug = originalDebug;
-
-	logger.info("Exchange loaded successfully");
-
   if (process.env.RPC_DOUBLEDOWN_1) {
     const doubledown_1 = new Connection(process.env.RPC_DOUBLEDOWN_1);
     await Exchange.addDoubleDownConnection(doubledown_1);
@@ -73,6 +64,15 @@ async function validateAndInitialize(markets) {
     const doubledown_2 = new Connection(process.env.RPC_DOUBLEDOWN_2);
     await Exchange.addDoubleDownConnection(doubledown_2);
   }
+
+	// Restore console methods
+	console.log = originalLog;
+	console.error = originalError;
+	console.info = originalInfo;
+	console.warn = originalWarn;
+	console.debug = originalDebug;
+
+	logger.info("Exchange loaded successfully");
 
 	return connection;
 }
