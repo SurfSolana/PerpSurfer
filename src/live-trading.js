@@ -103,6 +103,14 @@ async monitorSimpleProfitTarget(targetPercent = null) {
         const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
         const direction = currentPosition.size > 0 ? "long" : "short";
         const accountState = await this.zetaWrapper.crossMarginAccountState();
+        
+        // Calculate unrealized PnL
+        const unrealizedPnl = direction === "long" 
+            ? ((currentPrice - entryPrice) / entryPrice) * 100 
+            : ((entryPrice - currentPrice) / entryPrice) * 100;
+        
+        // Calculate dollar PnL
+        const dollarPnL = (currentPosition.size * (currentPrice - entryPrice)) * (direction === "long" ? 1 : -1);
 
         if (!this.entryPrice) {
             this.entryPrice = entryPrice;
