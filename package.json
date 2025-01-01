@@ -7,6 +7,7 @@
   "scripts": {
     "start": "pm2 flush perpsurfer && pm2 restart perpsurfer && pm2 log perpsurfer",
     "stop": "pm2 stop perpsurfer",
+    "log": "pm2 log perpsurfer --raw",
     "market": "node src/utils/test-sentiment.js",
     "open": "node src/manage-position.js open",
     "close": "node src/manage-position.js close",
