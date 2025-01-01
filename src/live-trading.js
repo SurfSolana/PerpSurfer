@@ -30,6 +30,7 @@ import fs from "fs";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { getMarketSentiment } from "./utils/market-sentiment.js";
+import { positionCache } from "./utils/position-cache.js";
 
 const execAsync = promisify(exec);
 dotenv.config();
@@ -124,6 +125,9 @@ class SymbolTradingManager {
 		this.entryPrice = null;
 
 		this.trailingStatusMessage = "Waiting for threshold...";
+
+		// Position caching ID
+		this.currentPositionId = null;
 	}
 
 	/**
@@ -152,6 +156,53 @@ class SymbolTradingManager {
 	}
 
 	/**
+	 * Checks for and restores existing position state.
+	 *
+	 * @returns {Promise<boolean>} True if position was found and restored
+	 */
+	async checkAndRestorePosition() {
+		try {
+			const position = await this.zetaWrapper.getPosition(this.marketIndex);
+			const accountState = await this.zetaWrapper.crossMarginAccountState();
+
+			if (!position || position.size === 0) {
+				logger.info(`[${this.symbol}] No existing position found during startup`);
+				return false;
+			}
+
+			const cachedPosition = await positionCache.findOrCreatePosition(this.symbol, position, accountState);
+
+			if (await positionCache.validatePosition(this.symbol, position, cachedPosition)) {
+				// Restore position state from cache
+				this.currentPositionId = cachedPosition.id;
+				this.currentDirection = position.size > 0 ? "long" : "short";
+
+				// Restore monitoring state
+				Object.assign(this, cachedPosition.state);
+
+				logger.info(`[${this.symbol}] Restored existing ${this.currentDirection} position on startup`, {
+					positionId: this.currentPositionId,
+					size: position.size,
+					entryPrice: this.entryPrice.toFixed(4),
+					initialBalance: this.initialBalance.toFixed(2),
+					trailingStopPrice: this.trailingStopPrice?.toFixed(4),
+					hasReachedThreshold: this.hasReachedThreshold,
+				});
+
+				// Start monitoring with restored state
+				this.startSimpleProfitMonitor(this.settings.simpleTakeProfit);
+				return true;
+			} else {
+				// Position exists but doesn't match cache - create new tracking
+				return await this.initializePositionTracking(position.size > 0 ? "long" : "short");
+			}
+		} catch (error) {
+			logger.error(`[${this.symbol}] Error checking existing position:`, error);
+			return false;
+		}
+	}
+
+	/**
 	 * Core profit monitoring logic that tracks position performance and executes
 	 * take profit, stop loss, and trailing stop conditions.
 	 *
@@ -166,9 +217,13 @@ class SymbolTradingManager {
 	 *
 	 * @param {number} targetPercent - Take profit target percentage
 	 */
-
 	async monitorSimpleProfitTarget(targetPercent = null) {
 		try {
+			if (!this.currentPositionId) {
+				logger.warn(`[${this.symbol}] No position ID found for monitoring`);
+				return;
+			}
+
 			if (this.isClosing) return;
 
 			this.settings = CONFIG.getTokenSettings(this.symbol);
@@ -188,40 +243,54 @@ class SymbolTradingManager {
 
 			// Calculate BALANCE impact - this is what matters with leverage
 			const priceDifference = direction === "long" ? currentPrice - entryPrice : entryPrice - currentPrice;
-			const dollarPnL = currentPosition.size * priceDifference; // Actual $ impact on our balance
-			const initialBalance = accountState.balance - dollarPnL; // What balance was when we entered
-			const unrealizedPnl = (dollarPnL / initialBalance) * 100; // Percentage change in our total balance
+			const dollarPnL = currentPosition.size * priceDifference;
+			const initialBalance = accountState.balance - dollarPnL;
+			const unrealizedPnl = (dollarPnL / initialBalance) * 100;
 
 			// Initialize tracking on new position - all numbers track BALANCE changes
 			if (!this.entryPrice) {
 				this.entryPrice = entryPrice;
 				this.initialBalance = initialBalance;
-				this.highestProgress = unrealizedPnl; // Track best balance impact
-				this.lowestProgress = 0; // Track worst balance impact
+				this.highestProgress = unrealizedPnl;
+				this.lowestProgress = 0;
 
 				// Set initial trailing stop based on balance impact threshold
 				const initialBalanceRisk = (this.settings.trailingStop.initialDistance * initialBalance) / (currentPosition.size * 100);
 				this.trailingStopPrice = direction === "long" ? entryPrice - initialBalanceRisk : entryPrice + initialBalanceRisk;
+
+				// Update cache with initial state
+				await positionCache.updatePositionState(this.currentPositionId, {
+					entryPrice: this.entryPrice,
+					initialBalance: this.initialBalance,
+					highestProgress: this.highestProgress,
+					lowestProgress: this.lowestProgress,
+					trailingStopPrice: this.trailingStopPrice,
+					currentDirection: direction,
+					hasReachedThreshold: false,
+					thresholdHits: 0,
+					takeProfitHits: 0,
+					stopLossHits: 0,
+					trailingStopHits: 0,
+					trailingStatusMessage: "Waiting for threshold...",
+				});
 			}
 
 			// Update our highest and lowest balance impacts
 			this.highestProgress = Math.max(this.highestProgress, unrealizedPnl);
 			this.lowestProgress = Math.min(this.lowestProgress, unrealizedPnl);
 
-			// Handle trailing stops based on BALANCE changes, not just price
+			// Handle trailing stops based on BALANCE changes
 			if (direction === "long") {
-				// Check if we've hit our initial balance gain threshold
 				if (unrealizedPnl >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
+					this.hasReachedThreshold = true;
 					this.trailingStatusMessage = `[${this.symbol}] 🎯 Trailing Stop Threshold ${
 						this.settings.trailingStop.initialDistance
 					}% Balance Change Reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`;
 
 					this.trailingStatusMessage = `[${this.symbol}] 🔄 Now tracking ${this.settings.trailingStop.trailDistance}% balance pullback from new highs`;
-					this.hasReachedThreshold = true;
 				}
 
 				if (unrealizedPnl >= this.settings.trailingStop.initialDistance) {
-					// Calculate price needed for our maximum allowed balance pullback
 					const maxAllowedLoss = this.highestProgress - this.settings.trailingStop.trailDistance;
 					const requiredPrice = entryPrice + (maxAllowedLoss * initialBalance) / (currentPosition.size * 100);
 
@@ -234,23 +303,21 @@ class SymbolTradingManager {
 						}
 					}
 				} else {
-					// Reset trailing stop to initial balance-based distance
 					const initialStopDistance =
 						(this.settings.trailingStop.initialDistance * initialBalance) / (currentPosition.size * 100);
 					this.trailingStopPrice = entryPrice - initialStopDistance;
 				}
 			} else {
-				// Same logic for shorts but reversed
+				// Short position trailing stop logic
 				if (unrealizedPnl >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
+					this.hasReachedThreshold = true;
 					this.trailingStatusMessage = `[${this.symbol}] 🎯 Trailing Stop Threshold ${
 						this.settings.trailingStop.initialDistance
 					}% Balance Change Reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`;
 					this.trailingStatusMessage = `[${this.symbol}] 🔄 Now tracking ${this.settings.trailingStop.trailDistance}% balance pullback from new highs`;
-					this.hasReachedThreshold = true;
 				}
 
 				if (unrealizedPnl >= this.settings.trailingStop.initialDistance) {
-					// Calculate price needed for our maximum allowed balance pullback
 					const maxAllowedLoss = this.highestProgress - this.settings.trailingStop.trailDistance;
 					const requiredPrice = entryPrice - (maxAllowedLoss * initialBalance) / (currentPosition.size * 100);
 
@@ -263,13 +330,13 @@ class SymbolTradingManager {
 						}
 					}
 				} else {
-					// Reset trailing stop to initial balance-based distance
 					const initialStopDistance =
 						(this.settings.trailingStop.initialDistance * initialBalance) / (currentPosition.size * 100);
 					this.trailingStopPrice = entryPrice + initialStopDistance;
 				}
 			}
 
+			// Performance visualization and status updates
 			if (this.lastCheckedPrice !== currentPrice) {
 				const makeProgressBar = (percent, length = 42) => {
 					const normalizedPercent =
@@ -285,12 +352,7 @@ class SymbolTradingManager {
 					return "⚪";
 				};
 
-				// Calculate distance to trailing stop in terms of balance impact
-				const trailingStopPnL =
-					direction === "long"
-						? ((this.trailingStopPrice - entryPrice) / entryPrice) * 100 * this.settings.leverageMultiplier
-						: ((entryPrice - this.trailingStopPrice) / entryPrice) * 100 * this.settings.leverageMultiplier;
-
+				// Format status output
 				let output = `\n \n \n \n\n${this.symbol} ${direction === "long" ? "LONG" : "SHORT"}`;
 				output += ` 🎯 TP: ${this.takeProfitHits}/${CONFIG.position.thresholdHitCount}`;
 				output += ` SL: ${this.stopLossHits}/${CONFIG.position.thresholdHitCount}`;
@@ -321,7 +383,6 @@ class SymbolTradingManager {
 				output += `\n${makeProgressBar(unrealizedPnl)} ${getDirectionEmoji(unrealizedPnl)} ${unrealizedPnl.toFixed(2)}%`;
 				output += "\n─────────────────────────────────────────────────────────";
 
-				// Show highest and lowest balance impacts
 				output += `\nLow: ${this.lowestProgress.toFixed(2)}% | High: ${this.highestProgress.toFixed(2)}% `;
 				output += `\nBalance: $${accountState.balance.toFixed(2)} | P&L: $${dollarPnL.toFixed(2)}`;
 				output += "\n─────────────────────────────────────────────────────────";
@@ -400,6 +461,23 @@ class SymbolTradingManager {
 			} else {
 				this.takeProfitHits = 0;
 			}
+
+			// Update cache with latest state after all checks
+			await positionCache.updatePositionState(this.currentPositionId, {
+				hasReachedThreshold: this.hasReachedThreshold,
+				highestProgress: this.highestProgress,
+				lowestProgress: this.lowestProgress,
+				thresholdHits: this.thresholdHits,
+				takeProfitHits: this.takeProfitHits,
+				stopLossHits: this.stopLossHits,
+				trailingStopHits: this.trailingStopHits,
+				trailingStopPrice: this.trailingStopPrice,
+				lastCheckedPrice: currentPrice,
+				trailingStatusMessage: this.trailingStatusMessage,
+				currentDirection: direction,
+				entryPrice: this.entryPrice,
+				initialBalance: this.initialBalance,
+			});
 		} catch (error) {
 			logger.error(`[${this.symbol}] Error in balance-based monitoring:`, error);
 		}
@@ -407,43 +485,42 @@ class SymbolTradingManager {
 
 	/**
 	 * Resets and initializes position tracking state for a new position.
-	 * This ensures clean state when transitioning between positions.
 	 * @param {string} direction - Position direction ('long' or 'short')
+	 * @returns {Promise<boolean>} True if position tracking was initialized
 	 */
 	async initializePositionTracking(direction) {
-		// Reset all tracking state
-		this.hasReachedThreshold = false;
-		this.highestProgress = 0;
-		this.lowestProgress = 0;
-		this.thresholdHits = 0;
-		this.takeProfitHits = 0;
-		this.stopLossHits = 0;
-		this.trailingStopHits = 0;
-		this.highestPrice = 0;
-		this.lowestPrice = Infinity;
-		this.trailingStopPrice = null;
-		this.entryPrice = null;
-		this.lastCheckedPrice = null;
+		try {
+			const position = await this.zetaWrapper.getPosition(this.marketIndex);
+			const accountState = await this.zetaWrapper.crossMarginAccountState();
 
-		// Get current position details
-		const position = await this.zetaWrapper.getPosition(this.marketIndex);
-		if (!position || position.size === 0) {
-			logger.warn(`[${this.symbol}] No position found during tracking initialization`);
+			if (!position || position.size === 0) {
+				logger.warn(`[${this.symbol}] No position found during tracking initialization`);
+				return false;
+			}
+
+			const cachedPosition = await positionCache.findOrCreatePosition(this.symbol, position, accountState);
+
+			// Initialize tracking state
+			this.currentPositionId = cachedPosition.id;
+			this.currentDirection = direction;
+			Object.assign(this, cachedPosition.state);
+
+			logger.info(`[${this.symbol}] Initialized position tracking:`, {
+				positionId: this.currentPositionId,
+				direction,
+				size: position.size,
+				entryPrice: this.entryPrice?.toFixed(4),
+				initialBalance: this.initialBalance?.toFixed(2),
+				trailingStopPrice: this.trailingStopPrice?.toFixed(4),
+			});
+
+			this.startSimpleProfitMonitor(this.settings.simpleTakeProfit);
+			return true;
+		} catch (error) {
+			logger.error(`[${this.symbol}] Error initializing position tracking:`, error);
 			return false;
 		}
-
-		// Set initial position state
-		this.currentDirection = direction;
-		this.isClosing = false;
-		this.trailingStatusMessage = "Waiting for threshold...";
-
-		// Start the monitoring
-		this.startSimpleProfitMonitor(this.settings.simpleTakeProfit);
-
-		logger.info(`[${this.symbol}] Initialized tracking for ${direction} position`);
-		return true;
 	}
-
 	/**
 	 * Processes incoming trading signals while considering market sentiment.
 	 *
@@ -668,30 +745,32 @@ class SymbolTradingManager {
 	 * @param {string} reason - Reason for position closure
 	 * @returns {boolean} True if position was closed successfully
 	 */
-  async closePosition(reason = "") {
-    if (this.isClosing) {
-      logger.info(`[${this.symbol}] Already attempting to close position`);
-      return false;
-    }
+	async closePosition(reason = "") {
+		if (!this.currentPositionId) {
+			logger.warn(`[${this.symbol}] No position ID found for closure`);
+			return false;
+		}
 
-    this.isClosing = true;
-    const position = await this.zetaWrapper.getPosition(this.marketIndex);
+		if (this.isClosing) {
+			logger.info(`[${this.symbol}] Already attempting to close position`);
+			return false;
+		}
 
-    if (!position || position.size === 0) {
-      logger.info(`[${this.symbol}] No position found to close`);
-      this.stopMonitoring();
-      this.isClosing = false;
-      return true;
-    }
+		this.isClosing = true;
+		const position = await this.zetaWrapper.getPosition(this.marketIndex);
 
+		if (!position || position.size === 0) {
+			logger.info(`[${this.symbol}] No position found to close`);
+			this.stopMonitoring();
+			this.isClosing = false;
+			return true;
+		}
 
-		// Calculate final PnL metrics
 		const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
 		const entryPrice = Math.abs(position.costOfTrades / position.size);
 		const realizedPnl = position.size > 0 ? (currentPrice - entryPrice) / entryPrice : (entryPrice - currentPrice) / entryPrice;
 
 		try {
-			// Execute position closure command
 			await execAsync(`node src/manage-position.js close ${this.symbol} ${this.currentDirection}`, {
 				maxBuffer: 1024 * 1024 * 32,
 			});
@@ -699,42 +778,35 @@ class SymbolTradingManager {
 			logger.error(`[${this.symbol}] Position close command failed, verifying position state:`, error);
 		}
 
-		// Allow time for blockchain confirmation
-		logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying`);
+		logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying closure`);
 		await utils.sleep(CONFIG.position.waitAfterAction);
 
-    // Verify position closure with sufficient delay
-    logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying closure`);
-    await utils.sleep(CONFIG.position.waitAfterAction);
+		const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 
-    const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
-    
-    if (!verifyPosition || verifyPosition.size === 0) {
-      logger.info(`[${this.symbol}] Position closure verified`);
-      
-      // Log trade completion metrics
-      logger.addClosedPosition({
-        symbol: this.symbol,
-        size: position.size,
-        entryPrice,
-        exitPrice: currentPrice,
-        realizedPnl,
-        reason,
-      });
+		if (!verifyPosition || verifyPosition.size === 0) {
+			logger.info(`[${this.symbol}] Position closure verified`);
 
-      // Ensure complete stop of monitoring before any new positions
-      this.stopMonitoring();
-      this.isClosing = false;
-      return true;
-    }
+			logger.addClosedPosition({
+				symbol: this.symbol,
+				size: position.size,
+				entryPrice,
+				exitPrice: currentPrice,
+				realizedPnl,
+				reason,
+			});
 
-		// Handle failed closure
+			positionCache.removePosition(this.currentPositionId);
+			this.currentPositionId = null;
+			this.stopMonitoring();
+			this.isClosing = false;
+			return true;
+		}
+
 		logger.warn(`[${this.symbol}] Position still active after close attempt, resuming monitoring`, {
 			size: verifyPosition.size,
 			entryPrice: (verifyPosition.costOfTrades / verifyPosition.size).toFixed(4),
 		});
 
-		// Restart monitoring if closure failed
 		if (!this.positionMonitorInterval) {
 			const direction = verifyPosition.size > 0 ? "long" : "short";
 			this.currentDirection = direction;
@@ -912,8 +984,8 @@ class TradingManager {
 			}
 
 			// Check for existing positions that need monitoring
-			logger.info("[INIT] Checking existing positions");
-			await this.checkExistingPositions();
+			logger.info("[INIT] Checking existing position");
+			await this.checkExistingPosition();
 
 			// Set up system infrastructure
 			this.setupWebSocket();
@@ -937,34 +1009,24 @@ class TradingManager {
 	 * - System restarts
 	 * - Connection recovers
 	 * - After initialization
-	 *
-	 * For each existing position, it:
-	 * 1. Detects position direction and size
-	 * 2. Initializes appropriate monitoring
-	 * 3. Logs position details
 	 */
-	async checkExistingPositions() {
-		for (const [symbol, manager] of this.symbolManagers) {
-			try {
-				const position = await manager.zetaWrapper.getPosition(manager.marketIndex);
+	async checkExistingPosition() {
+		try {
+			logger.info("[INIT] Checking existing positions for all symbols");
 
-				if (position && position.size !== 0) {
-					const direction = position.size > 0 ? "long" : "short";
-					manager.currentDirection = direction;
-
-					logger.info(`[${symbol}] Found existing position`, {
-						direction,
-						size: position.size,
-						entryPrice: position.costOfTrades ? (position.costOfTrades / position.size).toFixed(4) : "N/A",
-					});
-
-					manager.startSimpleProfitMonitor(manager.settings.simpleTakeProfit);
-				} else {
-					logger.info(`[${symbol}] No existing position found`);
+			// Check positions for all symbol managers
+			for (const [symbol, manager] of this.symbolManagers) {
+				try {
+					const hasPosition = await manager.checkAndRestorePosition();
+					if (hasPosition) {
+						logger.info(`[INIT] Restored existing position for ${symbol}`);
+					}
+				} catch (error) {
+					logger.error(`[INIT] Error checking position for ${symbol}:`, error);
 				}
-			} catch (error) {
-				logger.error(`[INIT] Error checking ${symbol} position:`, error);
 			}
+		} catch (error) {
+			logger.error("[INIT] Error in position check:", error);
 		}
 	}
 
