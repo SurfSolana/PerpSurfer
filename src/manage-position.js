@@ -123,13 +123,13 @@ async function verifyPositionClosed(zetaWrapper, asset, direction) {
 
 async function retryOperation(operation, operationName, asset) {
 	// Save original exchange state for reload
-	const exchangeConfig = {
-		network: Exchange.network,
-		connection: Exchange.connection,
-		opts: Exchange.opts,
-	};
+	// const exchangeConfig = {
+	// 	network: Exchange.network,
+	// 	connection: Exchange.connection,
+	// 	opts: Exchange.opts,
+	// };
 
-	const keypairPath = process.env.KEYPAIR_FILE_PATH;
+	// const keypairPath = process.env.KEYPAIR_FILE_PATH;
 
 	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
 		try {
@@ -151,9 +151,6 @@ async function retryOperation(operation, operationName, asset) {
 			const isLastAttempt = attempt === MAX_RETRIES;
 			let errorMessage = error.message || error.toString();
 
-
-
-      
 			// Check for non-retryable errors
 			const isNonRetryable =
 				error.code === 6008 || // ZeroSize
@@ -180,43 +177,6 @@ async function retryOperation(operation, operationName, asset) {
 				logger.error(`${operationName} failed after ${MAX_RETRIES} attempts`);
 				throw error;
 			}
-
-			// Unload and reload exchange and client before retrying
-
-			logger.info("Unloading exchange and client...");
-			await Exchange.close();
-
-			logger.info("Reloading exchange and client...");
-			// Store original console methods
-			const originalLog = console.log;
-			const originalError = console.error;
-			const originalInfo = console.info;
-			const originalWarn = console.warn;
-			const originalDebug = console.debug;
-
-			// Disable all console output
-			console.log = () => {};
-			console.error = () => {};
-			console.info = () => {};
-			console.warn = () => {};
-			console.debug = () => {};
-
-			await Exchange.load({
-				network: exchangeConfig.network,
-				connection: exchangeConfig.connection,
-				opts: exchangeConfig.opts,
-			});
-
-			// Restore console methods
-			console.log = originalLog;
-			console.error = originalError;
-			console.info = originalInfo;
-			console.warn = originalWarn;
-			console.debug = originalDebug;
-
-			// Reinitialize the client
-			const zetaWrapper = new ZetaManagePositionClientWrapper();
-			await zetaWrapper.initialize(keypairPath);
 
 			const delay = getRandomRetryDelay();
 			logger.info(`Waiting ${delay}ms before retry...`);
