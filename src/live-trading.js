@@ -115,27 +115,28 @@ class SymbolTradingManager {
 
 			let priceProgressPercent;
 			// First - The Initial Setting
-
 			if (direction === "long") {
 				priceProgressPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
 				if (priceProgressPercent >= this.settings.trailingStop.initialDistance) {
-					// We've hit activation (2%)
-					// For longs: Stop should be highestPrice - 1%
-					const highestProgressStop =
-						this.entryPrice * (1 + (this.highestProgress - this.settings.trailingStop.trailDistance) / 100);
-					this.trailingStopPrice = highestProgressStop;
+					// Only update if new stop would be higher
+					const potentialNewStop = currentPrice * (1 - this.settings.trailingStop.trailDistance / 100);
+					if (potentialNewStop > this.trailingStopPrice) {
+						this.trailingStopPrice = potentialNewStop;
+					}
 				} else {
-					// Haven't hit activation yet, stay at initial distance
+					// THIS NEEDS TO CHANGE - Currently setting too far back
 					this.trailingStopPrice = currentPrice * (1 - (this.settings.trailingStop.initialDistance - priceProgressPercent) / 100);
 				}
 			} else {
 				priceProgressPercent = ((entryPrice - currentPrice) / entryPrice) * 100;
 				if (priceProgressPercent >= this.settings.trailingStop.initialDistance) {
-					// For shorts: Stop should be lowestPrice + 1%
-					const lowestProgressStop =
-						this.entryPrice * (1 - (this.highestProgress - this.settings.trailingStop.trailDistance) / 100);
-					this.trailingStopPrice = lowestProgressStop;
+					// Only update if new stop would be lower
+					const potentialNewStop = currentPrice * (1 + this.settings.trailingStop.trailDistance / 100);
+					if (potentialNewStop < this.trailingStopPrice) {
+						this.trailingStopPrice = potentialNewStop;
+					}
 				} else {
+					// THIS NEEDS TO CHANGE - Currently setting too far away
 					this.trailingStopPrice = currentPrice * (1 + (this.settings.trailingStop.initialDistance - priceProgressPercent) / 100);
 				}
 			}
@@ -194,7 +195,10 @@ class SymbolTradingManager {
 				output += `\nHigh: ${this.highestPrice.toFixed(2)} | Low: ${this.lowestPrice.toFixed(2)}`;
 
 				output += `\nTrailing Stop: ${this.trailingStopPrice.toFixed(2)} (${trailingStopDistance}% away)`;
-				output += priceProgressPercent >= this.settings.trailingStop.initialDistance ? " [ACTIVE]" : "";
+				output +=
+					priceProgressPercent >= this.settings.trailingStop.initialDistance
+						? " [ACTIVE]"
+						: "";
 				output += "\n─────────────────────────────────────────────────────────";
 
 				output += `\nSL -${this.settings.simpleStopLoss}% ──────────── Entry ──────────── TP ${this.settings.simpleTakeProfit}%`;
