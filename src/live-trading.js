@@ -115,6 +115,8 @@ async monitorSimpleProfitTarget(targetPercent = null) {
         this.highestPrice = Math.max(this.highestPrice || currentPrice, currentPrice);
         this.lowestPrice = Math.min(this.lowestPrice === Infinity ? currentPrice : this.lowestPrice, currentPrice);
 
+
+
         let priceProgressPercent;
         if (direction === "long") {
             priceProgressPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
@@ -164,15 +166,7 @@ async monitorSimpleProfitTarget(targetPercent = null) {
             }
         }
 
-        const dollarPnL =
-            direction === "long"
-                ? (currentPrice - entryPrice) * Math.abs(currentPosition.size)
-                : (entryPrice - currentPrice) * Math.abs(currentPosition.size);
 
-        const unrealizedPnl =
-            dollarPnL >= 0
-                ? ((accountState.balance + dollarPnL) / accountState.balance - 1) * 100
-                : -((1 - (accountState.balance + dollarPnL) / accountState.balance) * 100);
 
         this.highestProgress = Math.max(this.highestProgress, unrealizedPnl);
         this.lowestProgress = Math.min(this.lowestProgress, unrealizedPnl);
