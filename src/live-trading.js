@@ -83,6 +83,8 @@ class SymbolTradingManager {
 		logger.info(`[${this.symbol}] Started simple profit monitoring with ${target}% target`);
 	}
 
+
+  
 	async monitorSimpleProfitTarget(targetPercent = null) {
 		try {
 			if (this.isClosing) return;
