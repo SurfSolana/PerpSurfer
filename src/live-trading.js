@@ -119,17 +119,21 @@ async monitorSimpleProfitTarget(targetPercent = null) {
         if (direction === "long") {
             priceProgressPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
             // Track when we hit the initial threshold
-            if (priceProgressPercent >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
-                logger.notify(`[${this.symbol}] Trailing Stop Activated! Price progress: ${priceProgressPercent.toFixed(2)}%`);
+            if (unrealizedPnl >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
+                logger.notify(`[${this.symbol}] 🎯 Trailing Stop Threshold ${this.settings.trailingStop.initialDistance}% Reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`);
+                logger.notify(`[${this.symbol}] 🔄 Now tracking ${this.settings.trailingStop.trailDistance}% pullback from new highs`);
                 this.hasReachedThreshold = true;
             }
             // Only start trailing after hitting initial profit target
-            if (priceProgressPercent >= this.settings.trailingStop.initialDistance) {
+            if (unrealizedPnl >= this.settings.trailingStop.initialDistance) {
                 // Calculate new potential stop price
                 const potentialNewStop = currentPrice * (1 - this.settings.trailingStop.trailDistance / 100);
                 // Update only if it would raise the stop price
                 if (potentialNewStop > this.trailingStopPrice) {
                     this.trailingStopPrice = potentialNewStop;
+                    if (this.hasReachedThreshold) {
+                        logger.notify(`[${this.symbol}] 📈 New High - Trailing Stop raised to ${this.trailingStopPrice.toFixed(2)}`);
+                    }
                 }
             } else {
                 // Before hitting target, trailing stop is set at entry price - initial distance
@@ -138,17 +142,21 @@ async monitorSimpleProfitTarget(targetPercent = null) {
         } else {
             priceProgressPercent = ((entryPrice - currentPrice) / entryPrice) * 100;
             // Track when we hit the initial threshold
-            if (priceProgressPercent >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
-                logger.notify(`[${this.symbol}] Trailing Stop Activated! Price progress: ${priceProgressPercent.toFixed(2)}%`);
+            if (unrealizedPnl >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
+                logger.notify(`[${this.symbol}] 🎯 Trailing Stop Threshold ${this.settings.trailingStop.initialDistance}% Reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`);
+                logger.notify(`[${this.symbol}] 🔄 Now tracking ${this.settings.trailingStop.trailDistance}% pullback from new highs`);
                 this.hasReachedThreshold = true;
             }
             // Only start trailing after hitting initial profit target
-            if (priceProgressPercent >= this.settings.trailingStop.initialDistance) {
+            if (unrealizedPnl >= this.settings.trailingStop.initialDistance) {
                 // Calculate new potential stop price
                 const potentialNewStop = currentPrice * (1 + this.settings.trailingStop.trailDistance / 100);
                 // Update only if it would lower the stop price
                 if (potentialNewStop < this.trailingStopPrice) {
                     this.trailingStopPrice = potentialNewStop;
+                    if (this.hasReachedThreshold) {
+                        logger.notify(`[${this.symbol}] 📉 New Low - Trailing Stop lowered to ${this.trailingStopPrice.toFixed(2)}`);
+                    }
                 }
             } else {
                 // Before hitting target, trailing stop is set at entry price + initial distance
