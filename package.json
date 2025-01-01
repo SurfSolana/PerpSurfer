@@ -5,7 +5,7 @@
   "description": "",
   "main": "src/main.js",
   "scripts": {
-    "start": "pm2 flush perpsurfer && pm2 restart perpsurfer && pm2 log perpsurfer",
+    "start": "pm2 flush perpsurfer && pm2 restart perpsurfer && pm2 log perpsurfer --raw",
     "stop": "pm2 stop perpsurfer",
     "log": "pm2 log perpsurfer --raw",
     "market": "node src/utils/test-sentiment.js",
