@@ -406,6 +406,45 @@ class SymbolTradingManager {
 	}
 
 	/**
+	 * Resets and initializes position tracking state for a new position.
+	 * This ensures clean state when transitioning between positions.
+	 * @param {string} direction - Position direction ('long' or 'short')
+	 */
+	async initializePositionTracking(direction) {
+		// Reset all tracking state
+		this.hasReachedThreshold = false;
+		this.highestProgress = 0;
+		this.lowestProgress = 0;
+		this.thresholdHits = 0;
+		this.takeProfitHits = 0;
+		this.stopLossHits = 0;
+		this.trailingStopHits = 0;
+		this.highestPrice = 0;
+		this.lowestPrice = Infinity;
+		this.trailingStopPrice = null;
+		this.entryPrice = null;
+		this.lastCheckedPrice = null;
+
+		// Get current position details
+		const position = await this.zetaWrapper.getPosition(this.marketIndex);
+		if (!position || position.size === 0) {
+			logger.warn(`[${this.symbol}] No position found during tracking initialization`);
+			return false;
+		}
+
+		// Set initial position state
+		this.currentDirection = direction;
+		this.isClosing = false;
+		this.trailingStatusMessage = "Waiting for threshold...";
+
+		// Start the monitoring
+		this.startSimpleProfitMonitor(this.settings.simpleTakeProfit);
+
+		logger.info(`[${this.symbol}] Initialized tracking for ${direction} position`);
+		return true;
+	}
+
+	/**
 	 * Processes incoming trading signals while considering market sentiment.
 	 *
 	 * This function implements a sophisticated decision-making process:
@@ -602,7 +641,7 @@ class SymbolTradingManager {
 		logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying`);
 		await utils.sleep(CONFIG.position.waitAfterAction);
 
-		// Verify position and start monitoring
+		// When opening new position, verify and initialize tracking
 		const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
 		if (verifyPosition && verifyPosition.size !== 0) {
 			const actualDirection = verifyPosition.size > 0 ? "long" : "short";
@@ -610,8 +649,9 @@ class SymbolTradingManager {
 				size: verifyPosition.size,
 				entryPrice: verifyPosition.costOfTrades ? (verifyPosition.costOfTrades / verifyPosition.size).toFixed(4) : "N/A",
 			});
-			this.currentDirection = actualDirection;
-			this.startSimpleProfitMonitor(this.settings.simpleTakeProfit);
+
+			// Initialize tracking with clean state
+			await this.initializePositionTracking(actualDirection);
 		}
 	}
 
@@ -628,21 +668,22 @@ class SymbolTradingManager {
 	 * @param {string} reason - Reason for position closure
 	 * @returns {boolean} True if position was closed successfully
 	 */
-	async closePosition(reason = "") {
-		if (this.isClosing) {
-			logger.info(`[${this.symbol}] Already attempting to close position`);
-			return false;
-		}
+  async closePosition(reason = "") {
+    if (this.isClosing) {
+      logger.info(`[${this.symbol}] Already attempting to close position`);
+      return false;
+    }
 
-		this.isClosing = true;
-		const position = await this.zetaWrapper.getPosition(this.marketIndex);
+    this.isClosing = true;
+    const position = await this.zetaWrapper.getPosition(this.marketIndex);
 
-		if (!position || position.size === 0) {
-			logger.info(`[${this.symbol}] No position found to close`);
-			this.stopMonitoring();
-			this.isClosing = false;
-			return true;
-		}
+    if (!position || position.size === 0) {
+      logger.info(`[${this.symbol}] No position found to close`);
+      this.stopMonitoring();
+      this.isClosing = false;
+      return true;
+    }
+
 
 		// Calculate final PnL metrics
 		const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
@@ -662,26 +703,30 @@ class SymbolTradingManager {
 		logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying`);
 		await utils.sleep(CONFIG.position.waitAfterAction);
 
-		// Verify position closure
-		const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+    // Verify position closure with sufficient delay
+    logger.info(`[${this.symbol}] Waiting ${CONFIG.position.waitAfterAction}ms before verifying closure`);
+    await utils.sleep(CONFIG.position.waitAfterAction);
 
-		if (!verifyPosition || verifyPosition.size === 0) {
-			logger.info(`[${this.symbol}] Position closure verified`);
+    const verifyPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+    
+    if (!verifyPosition || verifyPosition.size === 0) {
+      logger.info(`[${this.symbol}] Position closure verified`);
+      
+      // Log trade completion metrics
+      logger.addClosedPosition({
+        symbol: this.symbol,
+        size: position.size,
+        entryPrice,
+        exitPrice: currentPrice,
+        realizedPnl,
+        reason,
+      });
 
-			// Log trade completion metrics
-			logger.addClosedPosition({
-				symbol: this.symbol,
-				size: position.size,
-				entryPrice,
-				exitPrice: currentPrice,
-				realizedPnl,
-				reason,
-			});
-
-			this.stopMonitoring();
-			this.isClosing = false;
-			return true;
-		}
+      // Ensure complete stop of monitoring before any new positions
+      this.stopMonitoring();
+      this.isClosing = false;
+      return true;
+    }
 
 		// Handle failed closure
 		logger.warn(`[${this.symbol}] Position still active after close attempt, resuming monitoring`, {
