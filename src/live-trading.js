@@ -444,7 +444,8 @@ class SymbolTradingManager {
 			}
 
 			// Check take profit against balance impact
-			if (unrealizedPnl >= target) {
+			if (unrealizedPnl >= target && !this.hasReachedThreshold) {
+				// Only check TP if trailing stop not active
 				this.takeProfitHits++;
 				this.stopLossHits = 0;
 				this.trailingStopHits = 0;
