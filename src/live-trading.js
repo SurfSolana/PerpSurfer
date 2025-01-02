@@ -252,11 +252,10 @@ class SymbolTradingManager {
 				this.entryPrice = entryPrice;
 				this.initialBalance = initialBalance;
 				this.highestProgress = unrealizedPnl;
-				this.lowestProgress = 0;
+				this.lowestProgress = unrealizedPnl;
 
-				// Set initial trailing stop based on balance impact threshold
-				const initialBalanceRisk = (this.settings.trailingStop.initialDistance * initialBalance) / (currentPosition.size * 100);
-				this.trailingStopPrice = direction === "long" ? entryPrice - initialBalanceRisk : entryPrice + initialBalanceRisk;
+				// Set initial trailing stop price (only used after threshold reached)
+				this.trailingStopPrice = entryPrice; // Will be updated when threshold is reached
 
 				// Update cache with initial state
 				await positionCache.updatePositionState(this.currentPositionId, {
@@ -280,60 +279,53 @@ class SymbolTradingManager {
 			this.lowestProgress = Math.min(this.lowestProgress, unrealizedPnl);
 
 			// Handle trailing stops based on BALANCE changes
-			if (direction === "long") {
-				if (unrealizedPnl >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
-					this.hasReachedThreshold = true;
-					this.trailingStatusMessage = `[${this.symbol}] 🎯 Trailing Stop Threshold ${
-						this.settings.trailingStop.initialDistance
-					}% Balance Change Reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`;
+			// For longs: Activate when profit >= initialDistance
+			// For shorts: Activate when profit >= initialDistance
+			if (!this.hasReachedThreshold && unrealizedPnl >= this.settings.trailingStop.initialDistance) {
+				this.hasReachedThreshold = true;
+				this.trailingStatusMessage = `[${this.symbol}] 🎯 Trailing Stop Threshold ${
+					this.settings.trailingStop.initialDistance
+				}% Balance Change Reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`;
 
-					this.trailingStatusMessage = `[${this.symbol}] 🔄 Now tracking ${this.settings.trailingStop.trailDistance}% balance pullback from new highs`;
+				// Set initial trailing stop price once threshold is reached
+				if (direction === "long") {
+					// For longs, set initial trailing stop below current price
+					const stopDistance = (this.settings.trailingStop.trailDistance * initialBalance) / (currentPosition.size * 100);
+					this.trailingStopPrice = currentPrice - stopDistance;
+				} else {
+					// For shorts, set initial trailing stop above current price
+					const stopDistance =
+						(this.settings.trailingStop.trailDistance * initialBalance) / (Math.abs(currentPosition.size) * 100);
+					this.trailingStopPrice = currentPrice + stopDistance;
 				}
 
-				if (unrealizedPnl >= this.settings.trailingStop.initialDistance) {
-					const maxAllowedLoss = this.highestProgress - this.settings.trailingStop.trailDistance;
-					const requiredPrice = entryPrice + (maxAllowedLoss * initialBalance) / (currentPosition.size * 100);
+				this.trailingStatusMessage = `[${this.symbol}] 🔄 Now tracking ${this.settings.trailingStop.trailDistance}% balance pullback from new highs`;
+			}
 
-					if (requiredPrice > this.trailingStopPrice) {
-						this.trailingStopPrice = requiredPrice;
-						if (this.hasReachedThreshold) {
-							this.trailingStatusMessage = `[${
-								this.symbol
-							}] 📈 New Balance High - Trailing Stop raised to ${this.trailingStopPrice.toFixed(2)}`;
-						}
+			// Update trailing stop if threshold reached and new high/low made
+			if (this.hasReachedThreshold) {
+				if (direction === "long") {
+					// For longs, move stop up as price moves up
+					const maxAllowedLoss = this.highestProgress - this.settings.trailingStop.trailDistance;
+					const newStopPrice = entryPrice + (maxAllowedLoss * initialBalance) / (currentPosition.size * 100);
+
+					if (newStopPrice > this.trailingStopPrice) {
+						this.trailingStopPrice = newStopPrice;
+						this.trailingStatusMessage = `[${this.symbol}] 📈 New High - Trailing Stop raised to ${this.trailingStopPrice.toFixed(
+							2
+						)}`;
 					}
 				} else {
-					const initialStopDistance =
-						(this.settings.trailingStop.initialDistance * initialBalance) / (currentPosition.size * 100);
-					this.trailingStopPrice = entryPrice - initialStopDistance;
-				}
-			} else {
-				// Short position trailing stop logic
-				if (unrealizedPnl >= this.settings.trailingStop.initialDistance && !this.hasReachedThreshold) {
-					this.hasReachedThreshold = true;
-					this.trailingStatusMessage = `[${this.symbol}] 🎯 Trailing Stop Threshold ${
-						this.settings.trailingStop.initialDistance
-					}% Balance Change Reached! Current PnL: ${unrealizedPnl.toFixed(2)}%`;
-					this.trailingStatusMessage = `[${this.symbol}] 🔄 Now tracking ${this.settings.trailingStop.trailDistance}% balance pullback from new highs`;
-				}
-
-				if (unrealizedPnl >= this.settings.trailingStop.initialDistance) {
+					// For shorts, move stop down as price moves down
 					const maxAllowedLoss = this.highestProgress - this.settings.trailingStop.trailDistance;
-					// Fixed calculation for short positions
-					const requiredPrice = entryPrice + (maxAllowedLoss * initialBalance) / (Math.abs(currentPosition.size) * 100);
+					const newStopPrice = entryPrice - (maxAllowedLoss * initialBalance) / (Math.abs(currentPosition.size) * 100);
 
-					if (requiredPrice < this.trailingStopPrice) {
-						this.trailingStopPrice = requiredPrice;
-						if (this.hasReachedThreshold) {
-							this.trailingStatusMessage = `[${
-								this.symbol
-							}] 📉 New Balance High - Trailing Stop lowered to ${this.trailingStopPrice.toFixed(2)}`;
-						}
+					if (newStopPrice < this.trailingStopPrice) {
+						this.trailingStopPrice = newStopPrice;
+						this.trailingStatusMessage = `[${this.symbol}] 📉 New Low - Trailing Stop lowered to ${this.trailingStopPrice.toFixed(
+							2
+						)}`;
 					}
-				} else {
-					const initialStopDistance =
-						(this.settings.trailingStop.initialDistance * initialBalance) / (Math.abs(currentPosition.size) * 100);
-					this.trailingStopPrice = entryPrice + initialStopDistance;
 				}
 			}
 
@@ -343,7 +335,7 @@ class SymbolTradingManager {
 					// This normalization uses take profit and stop loss values to scale the visualization.
 					// The take profit is not an actual exit condition but helps define the visual range
 					// of the progress bar.
-          // 
+					//
 					// For both longs and shorts:
 					// - Left edge of bar (-100%) represents maximum stop loss
 					// - Center of bar (0%) represents break-even
@@ -399,31 +391,34 @@ class SymbolTradingManager {
 				this.lastCheckedPrice = currentPrice;
 			}
 
-			// Check if we've hit our trailing stop price
-			const trailingStopHit =
-				direction === "long" ? currentPrice <= this.trailingStopPrice : currentPrice >= this.trailingStopPrice;
+			// REPLACE everything after the visualization block with this new code:
+			// Check trailing stop only if threshold has been reached
+			if (this.hasReachedThreshold) {
+				const trailingStopHit =
+					direction === "long" ? currentPrice <= this.trailingStopPrice : currentPrice >= this.trailingStopPrice;
 
-			if (trailingStopHit) {
-				this.trailingStopHits++;
-				this.takeProfitHits = 0;
-				this.stopLossHits = 0;
+				if (trailingStopHit) {
+					this.trailingStopHits++;
+					this.takeProfitHits = 0;
+					this.stopLossHits = 0;
 
-				if (this.trailingStopHits >= CONFIG.position.thresholdHitCount) {
-					logger.notify(
-						`[${this.symbol}] Trailing stop confirmed after ${
-							CONFIG.position.thresholdHitCount
-						} hits at ${this.trailingStopPrice.toFixed(2)} (${unrealizedPnl.toFixed(2)}% balance change)`
-					);
-					const closed = await this.closePosition("Trailing stop hit");
-					if (closed) {
-						logger.notify(`[${this.symbol}] Position closed at trailing stop with ${unrealizedPnl.toFixed(2)}% balance change`);
-					} else {
-						logger.warn(`[${this.symbol}] Failed to close position at trailing stop - will retry`);
+					if (this.trailingStopHits >= CONFIG.position.thresholdHitCount) {
+						logger.notify(
+							`[${this.symbol}] Trailing stop confirmed after ${
+								CONFIG.position.thresholdHitCount
+							} hits at ${this.trailingStopPrice.toFixed(2)} (${unrealizedPnl.toFixed(2)}% balance change)`
+						);
+						const closed = await this.closePosition("Trailing stop hit");
+						if (closed) {
+							logger.notify(`[${this.symbol}] Position closed at trailing stop with ${unrealizedPnl.toFixed(2)}% balance change`);
+						} else {
+							logger.warn(`[${this.symbol}] Failed to close position at trailing stop - will retry`);
+						}
+						return;
 					}
-					return;
+				} else {
+					this.trailingStopHits = 0;
 				}
-			} else {
-				this.trailingStopHits = 0;
 			}
 
 			// Check stop loss against balance impact
@@ -448,35 +443,6 @@ class SymbolTradingManager {
 				}
 			} else {
 				this.stopLossHits = 0;
-			}
-
-			// Check take profit against balance impact
-			if (unrealizedPnl >= target && !this.hasReachedThreshold) {
-				// NOTE: This take profit condition is never actually reached in practice
-				// because the trailing stop threshold is lower than the take profit level.
-				// The take profit value is primarily used for scaling the progress bar visualization
-				// rather than as an actual exit condition. The position management relies on
-				// trailing stops for profit taking.
-				//
-				// This visualization scaling works identically for both long and short positions
-				// because the unrealizedPnL calculation already accounts for position direction:
-				// - Longs: profit = currentPrice - entryPrice
-				// - Shorts: profit = entryPrice - currentPrice
-				this.takeProfitHits++;
-				this.stopLossHits = 0;
-				this.trailingStopHits = 0;
-
-				if (this.takeProfitHits >= CONFIG.position.thresholdHitCount) {
-					logger.notify(`[${this.symbol}] Take profit confirmed: ${unrealizedPnl.toFixed(2)}% balance change`);
-					const closed = await this.closePosition("Target profit reached");
-					if (closed) {
-						logger.notify(`[${this.symbol}] Position closed at ${unrealizedPnl.toFixed(2)}% balance gain`);
-					} else {
-						logger.warn(`[${this.symbol}] Failed to close position at profit target - will retry`);
-					}
-				}
-			} else {
-				this.takeProfitHits = 0;
 			}
 
 			// Update cache with latest state after all checks
