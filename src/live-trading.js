@@ -319,7 +319,8 @@ class SymbolTradingManager {
 
 				if (unrealizedPnl >= this.settings.trailingStop.initialDistance) {
 					const maxAllowedLoss = this.highestProgress - this.settings.trailingStop.trailDistance;
-					const requiredPrice = entryPrice - (maxAllowedLoss * initialBalance) / (Math.abs(currentPosition.size) * 100);
+					// Fixed calculation for short positions
+					const requiredPrice = entryPrice + (maxAllowedLoss * initialBalance) / (Math.abs(currentPosition.size) * 100);
 
 					if (requiredPrice < this.trailingStopPrice) {
 						this.trailingStopPrice = requiredPrice;
@@ -376,9 +377,9 @@ class SymbolTradingManager {
 					output += `\nTSL: Need ${distanceToThreshold.toFixed(2)}% more to reach threshold`;
 				}
 
-				output += this.hasReachedThreshold ? " 🟢" : " ⚪";
-				output += "\n─────────────────────────────────────────────────────────";
+				// output += this.hasReachedThreshold ? " ✅" : " 🔄";
 
+				output += "\n─────────────────────────────────────────────────────────";
 				output += `\nSL -${this.settings.simpleStopLoss}% ──────────── Entry ──────────── TP ${this.settings.simpleTakeProfit}%`;
 				output += `\n${makeProgressBar(unrealizedPnl)} ${getDirectionEmoji(unrealizedPnl)} ${unrealizedPnl.toFixed(2)}%`;
 				output += "\n─────────────────────────────────────────────────────────";
