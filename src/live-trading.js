@@ -340,6 +340,14 @@ class SymbolTradingManager {
 			// Performance visualization and status updates
 			if (this.lastCheckedPrice !== currentPrice) {
 				const makeProgressBar = (percent, length = 42) => {
+					// This normalization uses take profit and stop loss values to scale the visualization.
+					// The take profit is not an actual exit condition but helps define the visual range
+					// of the progress bar.
+          // 
+					// For both longs and shorts:
+					// - Left edge of bar (-100%) represents maximum stop loss
+					// - Center of bar (0%) represents break-even
+					// - Right edge of bar (+100%) represents maximum take profit level
 					const normalizedPercent =
 						(percent + this.settings.simpleStopLoss) / (this.settings.simpleTakeProfit + this.settings.simpleStopLoss);
 					const position = Math.round(length * normalizedPercent);
@@ -376,8 +384,6 @@ class SymbolTradingManager {
 					const distanceToThreshold = this.settings.trailingStop.initialDistance - unrealizedPnl;
 					output += `\nTSL: Need ${distanceToThreshold.toFixed(2)}% more to reach threshold`;
 				}
-
-				// output += this.hasReachedThreshold ? " ✅" : " 🔄";
 
 				output += "\n─────────────────────────────────────────────────────────";
 				output += `\nSL -${this.settings.simpleStopLoss}% ──────────── Entry ──────────── TP ${this.settings.simpleTakeProfit}%`;
@@ -446,7 +452,16 @@ class SymbolTradingManager {
 
 			// Check take profit against balance impact
 			if (unrealizedPnl >= target && !this.hasReachedThreshold) {
-				// Only check TP if trailing stop not active
+				// NOTE: This take profit condition is never actually reached in practice
+				// because the trailing stop threshold is lower than the take profit level.
+				// The take profit value is primarily used for scaling the progress bar visualization
+				// rather than as an actual exit condition. The position management relies on
+				// trailing stops for profit taking.
+				//
+				// This visualization scaling works identically for both long and short positions
+				// because the unrealizedPnL calculation already accounts for position direction:
+				// - Longs: profit = currentPrice - entryPrice
+				// - Shorts: profit = entryPrice - currentPrice
 				this.takeProfitHits++;
 				this.stopLossHits = 0;
 				this.trailingStopHits = 0;
