@@ -319,7 +319,7 @@ class SymbolTradingManager {
 
 				if (unrealizedPnl >= this.settings.trailingStop.initialDistance) {
 					const maxAllowedLoss = this.highestProgress - this.settings.trailingStop.trailDistance;
-					const requiredPrice = entryPrice - (maxAllowedLoss * initialBalance) / (currentPosition.size * 100);
+					const requiredPrice = entryPrice - (maxAllowedLoss * initialBalance) / (Math.abs(currentPosition.size) * 100);
 
 					if (requiredPrice < this.trailingStopPrice) {
 						this.trailingStopPrice = requiredPrice;
@@ -331,7 +331,7 @@ class SymbolTradingManager {
 					}
 				} else {
 					const initialStopDistance =
-						(this.settings.trailingStop.initialDistance * initialBalance) / (currentPosition.size * 100);
+						(this.settings.trailingStop.initialDistance * initialBalance) / (Math.abs(currentPosition.size) * 100);
 					this.trailingStopPrice = entryPrice + initialStopDistance;
 				}
 			}
